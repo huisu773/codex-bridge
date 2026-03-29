@@ -5,6 +5,7 @@ import {
   getOrCreateSession,
   deleteSession,
   updateSessionModel,
+  updateCodexSessionId,
   listAllSessions,
   appendConversation,
   saveGeneratedFile,
@@ -22,6 +23,20 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import type { PlatformMessage } from "../platforms/types.js";
 
+// Per-chat task queue for parallel execution across chats
+const chatQueues = new Map<string, Promise<void>>();
+
+function enqueueChatTask(chatKey: string, task: () => Promise<void>): Promise<void> {
+  const previous = chatQueues.get(chatKey) || Promise.resolve();
+  const current = previous.then(task).catch((err) => {
+    // Don't let errors break the queue chain
+    const { logger } = require("../utils/logger.js");
+    logger.error({ err, chatKey }, "Chat task queue error");
+  });
+  chatQueues.set(chatKey, current);
+  return current;
+}
+
 function getCodexAccountInfo(): Record<string, string> {
   const info: Record<string, string> = {};
   try {
@@ -33,7 +48,6 @@ function getCodexAccountInfo(): Record<string, string> {
     const auth = JSON.parse(readFileSync(authPath, "utf-8"));
     info.authMode = auth.auth_mode || "unknown";
 
-    // Decode JWT access token to extract plan info
     const tokens = auth.tokens;
     if (tokens?.access_token) {
       const parts = tokens.access_token.split(".");
@@ -48,7 +62,6 @@ function getCodexAccountInfo(): Record<string, string> {
         const profile = payload["https://api.openai.com/profile"] || {};
         info.email = profile.email || "";
 
-        // Token expiry
         if (payload.exp) {
           const expDate = new Date(payload.exp * 1000);
           const now = new Date();
@@ -62,7 +75,6 @@ function getCodexAccountInfo(): Record<string, string> {
       }
     }
 
-    // Decode id_token for subscription info
     if (tokens?.id_token) {
       const parts = tokens.id_token.split(".");
       if (parts.length >= 2) {
@@ -93,13 +105,11 @@ function getCodexAccountInfo(): Record<string, string> {
 }
 
 export function registerNativeCommands(): void {
-  // /new — Create a new session
   registerCommand({
     name: "new",
     description: "Start a new Codex session",
     usage: "/new",
     execute: async (msg, _args, sendReply) => {
-      // Delete old session if exists
       deleteSession(msg.platform, msg.chatId);
       const session = createSession(msg.platform, msg.chatId, msg.userId);
       await sendReply(
@@ -110,7 +120,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /status — Show current session & system status
   registerCommand({
     name: "status",
     aliases: ["s"],
@@ -127,7 +136,7 @@ export function registerNativeCommands(): void {
         "",
         "— Session —",
         session
-          ? `ID: ${session.id}\nModel: ${session.model}\nMessages: ${session.messageCount}\nWorkdir: ${session.workingDir}\n📁 Session: ${session.sessionDir || "N/A"}`
+          ? `ID: ${session.id}\nModel: ${session.model}\nMessages: ${session.messageCount}\nWorkdir: ${session.workingDir}\n📁 Session: ${session.sessionDir || "N/A"}\n🔗 Codex thread: ${session.codexSessionId || "none"}`
           : "No active session (send a message or use /new to start)",
         "",
         "— Account —",
@@ -141,7 +150,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /model — View or switch model
   registerCommand({
     name: "model",
     aliases: ["models", "m"],
@@ -164,7 +172,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /compact — Compact the current conversation
   registerCommand({
     name: "compact",
     description: "Summarize and compact the current session context",
@@ -177,6 +184,7 @@ export function registerNativeCommands(): void {
         prompt: "Please provide a very brief summary of our conversation so far and the current state of work. Be concise.",
         model: session.model,
         workingDir: session.workingDir,
+        resumeSessionId: session.codexSessionId,
       });
 
       if (result.success) {
@@ -192,7 +200,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /sessions — List all sessions
   registerCommand({
     name: "sessions",
     aliases: ["ls"],
@@ -210,7 +217,7 @@ export function registerNativeCommands(): void {
         ...sessions.map(
           (s) => {
             const stats = s.stats || { totalGeneratedFiles: 0, totalReceivedFiles: 0, totalTokensUsed: 0 };
-            return `• ${s.id} | ${s.platform} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received\n  created: ${s.createdAt}`;
+            return `• ${s.id} | ${s.platform} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  🔗 thread: ${s.codexSessionId || "none"}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received\n  created: ${s.createdAt}`;
           },
         ),
       ];
@@ -218,7 +225,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /cancel — Cancel running tasks
   registerCommand({
     name: "cancel",
     description: "Cancel all running Codex tasks",
@@ -233,7 +239,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /clear — Clear current session
   registerCommand({
     name: "clear",
     description: "Clear and delete the current session",
@@ -248,7 +253,6 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // /resume — Resume latest session (just info, since we auto-resume by chatId)
   registerCommand({
     name: "resume",
     description: "Show current session (sessions auto-resume by chat)",
@@ -257,7 +261,7 @@ export function registerNativeCommands(): void {
       const session = getSession(msg.platform, msg.chatId);
       if (session) {
         await sendReply(
-          `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}`,
+          `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}\n🔗 Codex thread: ${session.codexSessionId || "none (will be created on next message)"}`,
         );
       } else {
         await sendReply(
@@ -267,102 +271,174 @@ export function registerNativeCommands(): void {
     },
   });
 
-  // __codex_passthrough__ — Hidden handler for non-command messages
+  // __codex_passthrough__ — Core handler for non-command messages
   registerCommand({
     name: "__codex_passthrough__",
     description: "Send message to Codex",
     usage: "(internal)",
     hidden: true,
     execute: async (msg, _args, sendReply, sendFile) => {
-      const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
+      const chatKey = `${msg.platform}:${msg.chatId}`;
 
-      // Inject context about recently received files
-      const pendingFiles = consumePendingFiles(session);
-      let prompt = msg.text;
-      const imageFiles: string[] = [];
-      const otherFiles: string[] = [];
+      // Enqueue task for this chat (serialize within chat, parallel across chats)
+      await enqueueChatTask(chatKey, async () => {
+        const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
 
-      for (const f of pendingFiles) {
-        if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(f)) {
-          imageFiles.push(f);
-        } else {
-          otherFiles.push(f);
-        }
-      }
+        // Inject context about recently received files
+        const pendingFiles = consumePendingFiles(session);
+        let prompt = msg.text;
+        const imageFiles: string[] = [];
+        const otherFiles: string[] = [];
 
-      if (otherFiles.length > 0) {
-        const fileList = otherFiles.map((p) => `  - ${p}`).join("\n");
-        prompt = `[Context: The user recently uploaded the following file(s) to the working directory:\n${fileList}\nPlease take these files into account when responding.]\n\n${prompt}`;
-      }
-      if (imageFiles.length > 0 && !prompt) {
-        prompt = "Please describe or analyze the image(s) I just sent.";
-      }
-
-      appendConversation(session, {
-        timestamp: nowISO(),
-        role: "user",
-        content: msg.text,
-        files: msg.files?.map((f) => f.name),
-      });
-
-      const result = await executeCodex({
-        prompt,
-        model: session.model,
-        workingDir: session.workingDir,
-        images: imageFiles.length > 0 ? imageFiles : undefined,
-      });
-
-      // Update token usage
-      if (result.usage) {
-        session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
-      }
-
-      appendConversation(session, {
-        timestamp: nowISO(),
-        role: "assistant",
-        content: result.output,
-        metadata: {
-          exitCode: result.exitCode,
-          durationMs: result.durationMs,
-          newFiles: result.newFiles,
-        },
-      });
-
-      if (result.output) {
-        await sendReply(result.output);
-      } else {
-        await sendReply(
-          result.success
-            ? "✅ Done (no output)."
-            : `❌ Codex exited with code ${result.exitCode}.`,
-        );
-      }
-
-      // Auto-save generated files to session folder and send to user
-      if (result.newFiles.length > 0) {
-        const MAX_AUTO_SEND = 10;
-        const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-        const filesToSend = result.newFiles.slice(0, MAX_AUTO_SEND);
-        for (const filePath of filesToSend) {
-          try {
-            if (!existsSync(filePath)) continue;
-            const stat = statSync(filePath);
-            if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
-            // Save copy to session's generated/ folder
-            saveGeneratedFile(session, filePath, msg.platform);
-            // Send to user
-            await sendFile(filePath, basename(filePath));
-            recordFileSent(session, filePath, msg.platform);
-          } catch {
-            // Ignore individual file send errors
+        for (const f of pendingFiles) {
+          // Skip audio files (already transcribed)
+          if (/\.(ogg|opus|mp3|wav|m4a|flac)$/i.test(f)) continue;
+          if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(f)) {
+            imageFiles.push(f);
+          } else {
+            otherFiles.push(f);
           }
         }
-        if (result.newFiles.length > MAX_AUTO_SEND) {
-          await sendReply(
-            `📁 ${result.newFiles.length} files created/modified, sent first ${MAX_AUTO_SEND}. Use /download for others.`,
-          );
+
+        if (otherFiles.length > 0) {
+          const fileList = otherFiles.map((p) => `  - ${p}`).join("\n");
+          prompt = `[Context: The user recently uploaded the following file(s) to the working directory:\n${fileList}\nPlease take these files into account when responding.]\n\n${prompt}`;
         }
-      }
+        if (imageFiles.length > 0 && !prompt) {
+          prompt = "Please describe or analyze the image(s) I just sent.";
+        }
+
+        appendConversation(session, {
+          timestamp: nowISO(),
+          role: "user",
+          content: msg.text,
+          files: msg.files?.map((f) => f.name),
+        });
+
+        // Streaming support
+        let streamMsgId = "";
+        let lastStreamUpdate = 0;
+        const STREAM_THROTTLE_MS = 1500; // throttle updates to avoid API rate limits
+
+        // Start streaming if platform supports it
+        if (msg.sendStreamStart) {
+          try {
+            streamMsgId = await msg.sendStreamStart("⏳ Processing...");
+          } catch {
+            // Streaming start failed, will fall back to normal reply
+          }
+        }
+
+        // Heartbeat timer: send progress every 60s
+        let heartbeatCount = 0;
+        const heartbeatInterval = setInterval(async () => {
+          heartbeatCount++;
+          const mins = heartbeatCount;
+          const text = `⏳ Still working... (${mins}m elapsed)`;
+          if (streamMsgId && msg.updateStream) {
+            try {
+              await msg.updateStream(streamMsgId, text);
+            } catch { /* ignore */ }
+          }
+        }, 60_000);
+
+        try {
+          const result = await executeCodex({
+            prompt,
+            model: session.model,
+            workingDir: session.workingDir,
+            images: imageFiles.length > 0 ? imageFiles : undefined,
+            resumeSessionId: session.codexSessionId,
+            onTextEvent: (newText, accumulated) => {
+              // Streaming: update message with accumulated text
+              if (streamMsgId && msg.updateStream) {
+                const now = Date.now();
+                if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
+                  lastStreamUpdate = now;
+                  msg.updateStream(streamMsgId, accumulated).catch(() => {});
+                }
+              }
+            },
+          });
+
+          clearInterval(heartbeatInterval);
+
+          // Save codex thread ID for multi-turn
+          if (result.threadId && result.threadId !== session.codexSessionId) {
+            updateCodexSessionId(session, result.threadId);
+          }
+
+          // Update token usage
+          if (result.usage) {
+            session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
+          }
+
+          appendConversation(session, {
+            timestamp: nowISO(),
+            role: "assistant",
+            content: result.output,
+            metadata: {
+              exitCode: result.exitCode,
+              durationMs: result.durationMs,
+              newFiles: result.newFiles,
+              threadId: result.threadId,
+            },
+          });
+
+          // Final response: if we were streaming, update the stream message with final content
+          if (streamMsgId && msg.updateStream && result.output) {
+            try {
+              await msg.updateStream(streamMsgId, result.output);
+            } catch {
+              // If stream update fails, send as new message
+              await sendReply(result.output);
+            }
+          } else if (result.output) {
+            await sendReply(result.output);
+          } else {
+            const statusMsg = result.success
+              ? "✅ Done (no output)."
+              : `❌ Codex exited with code ${result.exitCode}.`;
+            if (streamMsgId && msg.updateStream) {
+              await msg.updateStream(streamMsgId, statusMsg).catch(() => {});
+            } else {
+              await sendReply(statusMsg);
+            }
+          }
+
+          // Auto-save generated files to session folder and send to user
+          if (result.newFiles.length > 0) {
+            const MAX_AUTO_SEND = 10;
+            const MAX_FILE_SIZE = 50 * 1024 * 1024;
+            const filesToSend = result.newFiles.slice(0, MAX_AUTO_SEND);
+            for (const filePath of filesToSend) {
+              try {
+                if (!existsSync(filePath)) continue;
+                const stat = statSync(filePath);
+                if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
+                saveGeneratedFile(session, filePath, msg.platform);
+                await sendFile(filePath, basename(filePath));
+                recordFileSent(session, filePath, msg.platform);
+              } catch {
+                // Ignore individual file send errors
+              }
+            }
+            if (result.newFiles.length > MAX_AUTO_SEND) {
+              await sendReply(
+                `📁 ${result.newFiles.length} files created/modified, sent first ${MAX_AUTO_SEND}.`,
+              );
+            }
+          }
+        } catch (err) {
+          clearInterval(heartbeatInterval);
+          const errMsg = `❌ Execution error: ${err instanceof Error ? err.message : String(err)}`;
+          if (streamMsgId && msg.updateStream) {
+            await msg.updateStream(streamMsgId, errMsg).catch(() => {});
+          } else {
+            await sendReply(errMsg);
+          }
+        }
+      });
     },
   });
 }

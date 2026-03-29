@@ -135,6 +135,15 @@ export function updateSessionWorkingDir(
   saveMeta(session);
 }
 
+export function updateCodexSessionId(
+  session: Session,
+  codexSessionId: string,
+): void {
+  session.codexSessionId = codexSessionId;
+  session.updatedAt = nowISO();
+  saveMeta(session);
+}
+
 export function appendConversation(
   session: Session,
   entry: ConversationEntry,

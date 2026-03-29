@@ -2,7 +2,7 @@ import { type Context } from "grammy";
 import { routeMessage } from "../../core/command-router.js";
 import { isAuthorizedTelegram, checkRateLimit, sanitizeInput, filterSensitiveOutput } from "../../security/auth.js";
 import { logger } from "../../utils/logger.js";
-import { formatTelegramReply } from "./formatter.js";
+import { formatTelegramReply, formatTelegramStream, escapeHtml } from "./formatter.js";
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
 import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
@@ -10,6 +10,7 @@ import { nowISO } from "../../utils/helpers.js";
 import { join, basename } from "node:path";
 import { writeFileSync, createReadStream } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
+import { InputFile } from "grammy";
 
 async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffer> {
   const file = await ctx.api.getFile(fileId);
@@ -26,24 +27,28 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
 
   if (!userId || !chatId) return;
 
-  // Auth check
   if (!isAuthorizedTelegram(userId)) {
     logger.warn({ userId }, "Unauthorized Telegram user");
     await ctx.reply("🚫 You are not authorized to use this bot.");
     return;
   }
 
-  // Rate limit
   if (!checkRateLimit(String(userId))) {
     await ctx.reply("⏳ Rate limit exceeded. Please wait a moment.");
     return;
   }
 
   const sanitized = sanitizeInput(text);
-  if (!sanitized && !ctx.message?.document && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.audio && !ctx.message?.video_note) return;
+  const hasVoice = !!(ctx.message?.voice || ctx.message?.audio);
+  const hasPhoto = !!ctx.message?.photo;
+  const hasDoc = !!ctx.message?.document;
+  const hasVideoNote = !!ctx.message?.video_note;
 
-  // Handle file uploads
+  if (!sanitized && !hasDoc && !hasPhoto && !hasVoice && !hasVideoNote) return;
+
   const files: PlatformFile[] = [];
+
+  // Handle document uploads
   if (ctx.message?.document) {
     const doc = ctx.message.document;
     files.push({
@@ -54,6 +59,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     });
   }
 
+  // Handle photo uploads
   if (ctx.message?.photo) {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     files.push({
@@ -64,39 +70,45 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     });
   }
 
-  // Voice message handling
+  // Handle voice/audio messages — transcribe via STT
   let voiceTranscription = "";
-  if (ctx.message?.voice || ctx.message?.audio) {
-    const voice = ctx.message.voice || ctx.message.audio!;
-    const ext = ctx.message.voice ? "ogg" : (ctx.message.audio?.mime_type?.split("/")[1] || "mp3");
+  if (hasVoice) {
+    const voice = ctx.message!.voice || ctx.message!.audio!;
+    const ext = ctx.message!.voice ? "ogg" : (ctx.message!.audio?.mime_type?.split("/")[1] || "mp3");
     const fileName = `voice_${Date.now()}.${ext}`;
-    const voiceFile: PlatformFile = {
-      name: fileName,
-      mimeType: voice.mime_type || "audio/ogg",
-      size: voice.file_size,
-      getBuffer: () => downloadTelegramFile(ctx, voice.file_id),
-    };
-    files.push(voiceFile);
 
-    // Transcribe if STT is configured
     if (config.stt.provider !== "none") {
       await ctx.replyWithChatAction("typing").catch(() => {});
-      const session = getOrCreateSession("telegram", String(chatId), String(userId));
-      const buf = await voiceFile.getBuffer();
-      const savedPath = saveReceivedFile(session, fileName, buf, "telegram");
-      // Use the copy in working dir for transcription
-      const workPath = join(session.workingDir, fileName);
-      const sttResult = await transcribe(workPath, config.stt as STTConfig);
-      if (sttResult.success && sttResult.text) {
-        voiceTranscription = sttResult.text;
-        await ctx.reply(`🎤 Voice transcribed:\n${sttResult.text}`);
-      } else {
-        await ctx.reply(`🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+      try {
+        const session = getOrCreateSession("telegram", String(chatId), String(userId));
+        const buf = await downloadTelegramFile(ctx, voice.file_id);
+        saveReceivedFile(session, fileName, buf, "telegram");
+        const workPath = join(session.workingDir, fileName);
+        logger.info({ workPath, provider: config.stt.provider }, "Starting voice transcription");
+        const sttResult = await transcribe(workPath, config.stt as STTConfig);
+        if (sttResult.success && sttResult.text) {
+          voiceTranscription = sttResult.text;
+          await ctx.reply(`🎤 <i>Voice transcribed:</i>\n${escapeHtml(sttResult.text)}`, { parse_mode: "HTML" });
+        } else {
+          await ctx.reply(`🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+        }
+      } catch (err) {
+        logger.error({ err }, "Voice transcription error");
+        await ctx.reply("🎤 Voice saved but transcription failed.");
       }
+    } else {
+      // No STT, just save the file
+      const voiceFile: PlatformFile = {
+        name: fileName,
+        mimeType: voice.mime_type || "audio/ogg",
+        size: voice.file_size,
+        getBuffer: () => downloadTelegramFile(ctx, voice.file_id),
+      };
+      files.push(voiceFile);
     }
   }
 
-  // Video note (round video) handling
+  // Handle video notes
   if (ctx.message?.video_note) {
     const vn = ctx.message.video_note;
     files.push({
@@ -107,27 +119,28 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     });
   }
 
-  // Save uploaded files to session's received/ folder and working directory
-  // (voice files already saved above if STT was used)
-  const isVoiceHandled = voiceTranscription !== "" || (files.some(f => f.mimeType?.startsWith("audio/")) && config.stt.provider !== "none");
-  if (files.length > 0 && !sanitized.startsWith("/") && !isVoiceHandled) {
+  // Save non-voice files to session
+  const isImageOnly = hasPhoto && !sanitized && !voiceTranscription;
+  if (files.length > 0 && !sanitized.startsWith("/")) {
     const session = getOrCreateSession("telegram", String(chatId), String(userId));
     for (const f of files) {
       const buf = await f.getBuffer();
       saveReceivedFile(session, f.name, buf, "telegram");
     }
-    // If no text, just acknowledge the file
-    if (!sanitized) {
+    // For images: auto-analyze (don't return early)
+    // For documents without text: acknowledge and return
+    if (!isImageOnly && !sanitized && !voiceTranscription) {
       const names = files.map((f) => f.name).join(", ");
-      const hasAudio = files.some((f) => f.mimeType?.startsWith("audio/"));
-      const emoji = hasAudio ? "🎤" : "📎";
-      await ctx.reply(`${emoji} Received: ${names}\nFiles saved. You can now ask Codex about them.`);
+      await ctx.reply(`📎 Received: ${names}\nFiles saved. You can now ask Codex about them.`);
       return;
     }
   }
 
   // Use transcription as text if no other text was provided
-  const finalText = sanitized || voiceTranscription;
+  let finalText = sanitized || voiceTranscription;
+  if (!finalText && isImageOnly) {
+    finalText = "Please describe or analyze the image(s) I just sent.";
+  }
   if (!finalText && files.length === 0) return;
 
   const msg: PlatformMessage = {
@@ -136,9 +149,24 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     chatId: String(chatId),
     text: finalText,
     files,
+    // Streaming callbacks for real-time message updates
+    sendStreamStart: async (initText: string): Promise<string> => {
+      const sent = await ctx.reply(initText);
+      return String(sent.message_id);
+    },
+    updateStream: async (msgId: string, updatedText: string): Promise<void> => {
+      try {
+        const html = formatTelegramStream(updatedText);
+        await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
+      } catch {
+        // Edit can fail if content unchanged or message too old
+        try {
+          await ctx.api.editMessageText(chatId, Number(msgId), updatedText.slice(0, 4096));
+        } catch { /* ignore */ }
+      }
+    },
   };
 
-  // Show typing indicator
   await ctx.replyWithChatAction("typing").catch(() => {});
 
   const sendReply = async (replyText: string) => {
@@ -146,10 +174,12 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     const parts = formatTelegramReply(filtered);
     for (const part of parts) {
       try {
-        await ctx.reply(part, { parse_mode: undefined });
+        await ctx.reply(part, { parse_mode: "HTML" });
       } catch {
-        // Retry without parse mode if it fails
-        await ctx.reply(part).catch(() => {});
+        // Retry without HTML if formatting fails
+        try {
+          await ctx.reply(filtered.slice(0, 4096));
+        } catch { /* ignore */ }
       }
     }
   };
@@ -168,6 +198,3 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
 
   await routeMessage(msg, sendReply, sendFile);
 }
-
-// Re-export InputFile for sendFile
-import { InputFile } from "grammy";

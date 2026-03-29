@@ -12,7 +12,9 @@ export interface CodexExecOptions {
   workingDir?: string;
   images?: string[];
   timeoutMs?: number;
+  resumeSessionId?: string; // codex thread ID for multi-turn
   onProgress?: (chunk: string) => void;
+  onTextEvent?: (text: string, accumulated: string) => void; // called on each text item
 }
 
 export interface CodexExecResult {
@@ -22,6 +24,7 @@ export interface CodexExecResult {
   durationMs: number;
   usage?: { inputTokens: number; outputTokens: number; cachedTokens: number };
   newFiles: string[];
+  threadId?: string; // codex session ID for resume
 }
 
 export interface RealUsageStats {
@@ -67,7 +70,6 @@ export function getRealUsageStats(): RealUsageStats {
     logger.warn({ err }, "Failed to read Codex state DB for usage stats");
   }
 
-  // Rolling window: reset = oldest_request_in_window + window_duration
   const fiveHourResetAt = earliestFiveHr
     ? new Date((earliestFiveHr + 5 * 3600) * 1000)
     : new Date((now + 5 * 3600) * 1000);
@@ -81,7 +83,6 @@ export function getRealUsageStats(): RealUsageStats {
 
 const runningProcesses = new Map<string, ChildProcess>();
 
-// Snapshot files in directory (non-recursive, with mtime) to detect new/modified files
 function snapshotDir(dir: string): Map<string, number> {
   const snap = new Map<string, number>();
   try {
@@ -121,30 +122,49 @@ export async function executeCodex(
   const workDir = opts.workingDir || config.codex.workingDir;
   const timeout = opts.timeoutMs || 300_000; // 5 min default
 
-  // Snapshot files before execution to detect new/modified files
   const beforeSnap = snapshotDir(workDir);
-
-  // Use -o to capture final output to a temp file
   const outputFile = join(tmpdir(), `codex-out-${randomUUID().slice(0, 8)}.txt`);
 
-  const args = [
-    "exec",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check",
-    "-m", model,
-    "-C", workDir,
-    "-o", outputFile,
-    "--json",
-    opts.prompt,
-  ];
+  let args: string[];
+
+  if (opts.resumeSessionId) {
+    // Multi-turn: resume existing codex session
+    args = [
+      "exec",
+      "resume",
+      opts.resumeSessionId,
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+      "-m", model,
+      "-o", outputFile,
+      "--json",
+      opts.prompt,
+    ];
+  } else {
+    args = [
+      "exec",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+      "-m", model,
+      "-C", workDir,
+      "-o", outputFile,
+      "--json",
+      opts.prompt,
+    ];
+  }
 
   if (opts.images) {
+    // Insert image flags before --json
+    const jsonIdx = args.indexOf("--json");
     for (const img of opts.images) {
-      args.splice(args.indexOf("--json"), 0, "-i", img);
+      args.splice(jsonIdx, 0, "-i", img);
     }
   }
 
-  logger.info({ model, workDir, promptLen: opts.prompt.length }, "Executing codex");
+  logger.info(
+    { model, workDir, promptLen: opts.prompt.length, resume: !!opts.resumeSessionId },
+    "Executing codex",
+  );
 
   const start = Date.now();
   const execId = randomUUID().slice(0, 8);
@@ -160,11 +180,37 @@ export async function executeCodex(
 
     let stdout = "";
     let stderr = "";
+    let threadId: string | undefined;
+    let accumulatedText = "";
+    let lineBuffer = "";
 
     proc.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
       opts.onProgress?.(text);
+
+      // Parse JSONL events for streaming
+      lineBuffer += text;
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || ""; // keep incomplete last line
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          // Extract thread ID
+          if (event.type === "thread.started" && event.thread_id) {
+            threadId = event.thread_id;
+          }
+          // Extract text from item.completed events for streaming
+          if (event.type === "item.completed" && event.item?.text) {
+            accumulatedText += (accumulatedText ? "\n" : "") + event.item.text;
+            opts.onTextEvent?.(event.item.text, accumulatedText);
+          }
+        } catch {
+          // Not valid JSON, skip
+        }
+      }
     });
 
     proc.stderr?.on("data", (chunk: Buffer) => {
@@ -183,11 +229,24 @@ export async function executeCodex(
       runningProcesses.delete(execId);
       const durationMs = Date.now() - start;
 
-      // Detect new/modified files
+      // Process remaining line buffer
+      if (lineBuffer.trim()) {
+        try {
+          const event = JSON.parse(lineBuffer);
+          if (event.type === "thread.started" && event.thread_id) {
+            threadId = event.thread_id;
+          }
+          if (event.type === "item.completed" && event.item?.text) {
+            accumulatedText += (accumulatedText ? "\n" : "") + event.item.text;
+          }
+        } catch {
+          // skip
+        }
+      }
+
       const afterSnap = snapshotDir(workDir);
       const newFiles = diffSnapshots(beforeSnap, afterSnap);
 
-      // Read the captured output file if it exists
       let finalOutput = "";
       if (existsSync(outputFile)) {
         try {
@@ -200,7 +259,6 @@ export async function executeCodex(
 
       // Parse JSON events from stdout for usage tracking
       let usage: CodexExecResult["usage"] = undefined;
-      let agentText = "";
       try {
         for (const line of stdout.split("\n").filter(Boolean)) {
           const event = JSON.parse(line);
@@ -211,19 +269,19 @@ export async function executeCodex(
               cachedTokens: event.usage.cached_input_tokens || 0,
             };
           }
-          if (event.type === "item.completed" && event.item?.text) {
-            agentText += event.item.text + "\n";
+          if (!threadId && event.type === "thread.started" && event.thread_id) {
+            threadId = event.thread_id;
           }
         }
       } catch {
-        // Non-JSON output, use as-is
+        // Non-JSON output
       }
 
-      // Prefer -o file output, then parsed agent text, then raw stdout
-      const output = finalOutput || agentText.trim() || stdout || stderr;
+      // Prefer -o file output, then accumulated streaming text, then raw stdout
+      const output = finalOutput || accumulatedText.trim() || stdout || stderr;
 
       logger.info(
-        { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length },
+        { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length, threadId },
         "Codex execution completed",
       );
 
@@ -234,6 +292,7 @@ export async function executeCodex(
         durationMs,
         usage,
         newFiles,
+        threadId,
       });
     });
 

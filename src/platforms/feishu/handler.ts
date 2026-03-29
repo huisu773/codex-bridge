@@ -2,7 +2,7 @@ import * as lark from "@larksuiteoapi/node-sdk";
 import { routeMessage } from "../../core/command-router.js";
 import { isAuthorizedFeishu, checkRateLimit, sanitizeInput, filterSensitiveOutput } from "../../security/auth.js";
 import { logger } from "../../utils/logger.js";
-import { formatFeishuReply, buildFeishuTextContent } from "./formatter.js";
+import { formatFeishuReply, buildFeishuTextContent, buildFeishuCard, buildFeishuStreamCard } from "./formatter.js";
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
 import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
@@ -28,13 +28,80 @@ const DEDUP_TTL = 60_000;
 
 function isDuplicate(messageId: string): boolean {
   const now = Date.now();
-  // Cleanup old entries
   for (const [id, ts] of processedMessages) {
     if (now - ts > DEDUP_TTL) processedMessages.delete(id);
   }
   if (processedMessages.has(messageId)) return true;
   processedMessages.set(messageId, now);
   return false;
+}
+
+async function downloadFeishuResource(messageId: string, fileKey: string, type: string): Promise<Buffer> {
+  if (!client) throw new Error("Feishu client not initialized");
+  
+  try {
+    const resp = await client.im.messageResource.get({
+      path: { message_id: messageId, file_key: fileKey },
+      params: { type },
+    });
+
+    // The SDK may return different types depending on version:
+    // 1. Buffer directly
+    if (Buffer.isBuffer(resp)) return resp;
+    // 2. ArrayBuffer
+    if (resp instanceof ArrayBuffer) return Buffer.from(resp);
+    // 3. Axios response with data property
+    if (resp && typeof resp === "object") {
+      const data = (resp as any).data;
+      if (Buffer.isBuffer(data)) return data;
+      if (data instanceof ArrayBuffer) return Buffer.from(data);
+      // Stream in data property
+      if (data && typeof data[Symbol.asyncIterator] === "function") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of data) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks);
+      }
+      // data might be a Node.js Readable stream (pipe-based)
+      if (data && typeof data.read === "function") {
+        return await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          data.on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          data.on("end", () => resolve(Buffer.concat(chunks)));
+          data.on("error", reject);
+        });
+      }
+    }
+    // 4. Try as async iterable directly  
+    if (resp && typeof (resp as any)[Symbol.asyncIterator] === "function") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of resp as any) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    }
+    // 5. Try as Node.js Readable stream
+    if (resp && typeof (resp as any).read === "function") {
+      return await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        (resp as any).on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        (resp as any).on("end", () => resolve(Buffer.concat(chunks)));
+        (resp as any).on("error", reject);
+      });
+    }
+
+    logger.warn({ type: typeof resp, keys: Object.keys(resp || {}) }, "Unknown Feishu resource response format");
+    throw new Error("Cannot read Feishu resource response");
+  } catch (err: any) {
+    // If it's an Axios error with response data (binary), try to extract it
+    if (err.response?.data) {
+      const data = err.response.data;
+      if (Buffer.isBuffer(data)) return data;
+      if (data instanceof ArrayBuffer) return Buffer.from(data);
+    }
+    throw err;
+  }
 }
 
 export async function handleFeishuEvent(event: any): Promise<void> {
@@ -50,16 +117,14 @@ export async function handleFeishuEvent(event: any): Promise<void> {
   const chatId = event?.message?.chat_id || "";
   const msgType = event?.message?.message_type || "";
 
-  // Auth check
   if (!isAuthorizedFeishu(senderId)) {
     logger.warn({ senderId }, "Unauthorized Feishu user");
-    await replyFeishuText(messageId, "🚫 You are not authorized to use this bot.");
+    await replyFeishu(messageId, "🚫 You are not authorized to use this bot.");
     return;
   }
 
-  // Rate limit
   if (!checkRateLimit(senderId)) {
-    await replyFeishuText(messageId, "⏳ Rate limit exceeded. Please wait.");
+    await replyFeishu(messageId, "⏳ Rate limit exceeded. Please wait.");
     return;
   }
 
@@ -70,7 +135,6 @@ export async function handleFeishuEvent(event: any): Promise<void> {
     try {
       const content = JSON.parse(event.message.content);
       text = content.text || "";
-      // Remove @bot mentions
       text = text.replace(/@_user_\d+/g, "").trim();
     } catch {
       return;
@@ -82,20 +146,8 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       const fileName = content.file_name || "unnamed_file";
       files.push({
         name: fileName,
-        getBuffer: async () => {
-          const resp = await client!.im.messageResource.get({
-            path: { message_id: messageId, file_key: fileKey },
-            params: { type: "file" },
-          });
-          // The SDK returns a readable stream
-          const chunks: Buffer[] = [];
-          for await (const chunk of resp as any) {
-            chunks.push(Buffer.from(chunk));
-          }
-          return Buffer.concat(chunks);
-        },
+        getBuffer: () => downloadFeishuResource(messageId, fileKey, "file"),
       });
-      text = "/upload"; // Treat as upload command
     } catch (err) {
       logger.error({ err }, "Failed to parse Feishu file message");
       return;
@@ -107,17 +159,7 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       files.push({
         name: `image_${Date.now()}.png`,
         mimeType: "image/png",
-        getBuffer: async () => {
-          const resp = await client!.im.messageResource.get({
-            path: { message_id: messageId, file_key: imageKey },
-            params: { type: "image" },
-          });
-          const chunks: Buffer[] = [];
-          for await (const chunk of resp as any) {
-            chunks.push(Buffer.from(chunk));
-          }
-          return Buffer.concat(chunks);
-        },
+        getBuffer: () => downloadFeishuResource(messageId, imageKey, "image"),
       });
     } catch (err) {
       logger.error({ err }, "Failed to parse Feishu image message");
@@ -127,29 +169,17 @@ export async function handleFeishuEvent(event: any): Promise<void> {
     try {
       const content = JSON.parse(event.message.content);
       const fileKey = content.file_key;
-      const duration = content.duration || 0;
       files.push({
         name: `voice_${Date.now()}.opus`,
         mimeType: "audio/opus",
-        getBuffer: async () => {
-          const resp = await client!.im.messageResource.get({
-            path: { message_id: messageId, file_key: fileKey },
-            params: { type: "file" },
-          });
-          const chunks: Buffer[] = [];
-          for await (const chunk of resp as any) {
-            chunks.push(Buffer.from(chunk));
-          }
-          return Buffer.concat(chunks);
-        },
+        getBuffer: () => downloadFeishuResource(messageId, fileKey, "file"),
       });
     } catch (err) {
       logger.error({ err }, "Failed to parse Feishu audio message");
       return;
     }
   } else {
-    // Unsupported message type
-    await replyFeishuText(messageId, `⚠️ Unsupported message type: ${msgType}`);
+    await replyFeishu(messageId, `⚠️ Unsupported message type: ${msgType}`);
     return;
   }
 
@@ -160,37 +190,52 @@ export async function handleFeishuEvent(event: any): Promise<void> {
   let voiceTranscription = "";
   const isAudioMsg = msgType === "audio";
   if (isAudioMsg && config.stt.provider !== "none" && files.length > 0) {
-    const session = getOrCreateSession("feishu", chatId, senderId);
-    const f = files[0];
-    const buf = await f.getBuffer();
-    saveReceivedFile(session, f.name, buf, "feishu");
-    const workPath = join(session.workingDir, f.name);
-    const sttResult = await transcribe(workPath, config.stt as STTConfig);
-    if (sttResult.success && sttResult.text) {
-      voiceTranscription = sttResult.text;
-      await replyFeishuText(messageId, `🎤 Voice transcribed:\n${sttResult.text}`);
-    } else {
-      await replyFeishuText(messageId, `🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+    try {
+      const session = getOrCreateSession("feishu", chatId, senderId);
+      const f = files[0];
+      const buf = await f.getBuffer();
+      saveReceivedFile(session, f.name, buf, "feishu");
+      const workPath = join(session.workingDir, f.name);
+      logger.info({ workPath, provider: config.stt.provider }, "Starting Feishu voice transcription");
+      const sttResult = await transcribe(workPath, config.stt as STTConfig);
+      if (sttResult.success && sttResult.text) {
+        voiceTranscription = sttResult.text;
+        await replyFeishu(messageId, `🎤 Voice transcribed:\n${sttResult.text}`);
+      } else {
+        await replyFeishu(messageId, `🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+      }
+    } catch (err) {
+      logger.error({ err }, "Feishu voice transcription error");
+      await replyFeishu(messageId, "🎤 Voice saved but transcription failed.");
     }
   }
 
-  // Save files if not already saved by voice handling
+  // Save files (not already saved by voice handling)
+  const isImageOnly = msgType === "image" && !sanitized;
   if (files.length > 0 && !sanitized.startsWith("/") && !isAudioMsg) {
     const session = getOrCreateSession("feishu", chatId, senderId);
     for (const f of files) {
-      const buf = await f.getBuffer();
-      saveReceivedFile(session, f.name, buf, "feishu");
+      try {
+        const buf = await f.getBuffer();
+        saveReceivedFile(session, f.name, buf, "feishu");
+      } catch (err) {
+        logger.error({ err, fileName: f.name }, "Failed to save Feishu file");
+      }
     }
-    // If no text, just acknowledge
-    if (!sanitized) {
+    // For images: auto-analyze (don't return early)
+    // For documents without text: acknowledge and return
+    if (!isImageOnly && !sanitized) {
       const names = files.map((f) => f.name).join(", ");
-      await replyFeishuText(messageId, `📎 Received: ${names}\nFiles saved. You can now ask Codex about them.`);
+      await replyFeishu(messageId, `📎 Received: ${names}\nFiles saved. You can now ask Codex about them.`);
       return;
     }
   }
 
-  // Use transcription as text if no other text was provided
-  const finalText = sanitized || voiceTranscription;
+  // Use transcription as text if no other text
+  let finalText = sanitized || voiceTranscription;
+  if (!finalText && isImageOnly) {
+    finalText = "Please describe or analyze the image(s) I just sent.";
+  }
   if (!finalText && files.length === 0) return;
 
   const msg: PlatformMessage = {
@@ -199,20 +244,65 @@ export async function handleFeishuEvent(event: any): Promise<void> {
     chatId,
     text: finalText,
     files,
+    // Streaming callbacks for Feishu card updates
+    sendStreamStart: async (initText: string): Promise<string> => {
+      try {
+        const card = buildFeishuStreamCard(initText, false);
+        const resp = await client!.im.message.reply({
+          path: { message_id: messageId },
+          data: {
+            msg_type: "interactive",
+            content: JSON.stringify(card),
+          },
+        });
+        return (resp as any)?.data?.message_id || "";
+      } catch (err) {
+        logger.error({ err }, "Failed to send Feishu stream start");
+        return "";
+      }
+    },
+    updateStream: async (msgId: string, updatedText: string): Promise<void> => {
+      if (!msgId) return;
+      try {
+        const card = buildFeishuStreamCard(updatedText, false);
+        await client!.im.message.patch({
+          path: { message_id: msgId },
+          data: {
+            content: JSON.stringify(card),
+          },
+        });
+      } catch (err) {
+        // Card update can fail if content unchanged
+        logger.debug({ err }, "Feishu stream update failed (may be expected)");
+      }
+    },
   };
 
   const sendReply = async (replyText: string) => {
     const filtered = filterSensitiveOutput(replyText);
-    const parts = formatFeishuReply(filtered);
-    for (const part of parts) {
-      await replyFeishuText(messageId, part);
+    // Use card message by default for rich formatting
+    try {
+      const card = buildFeishuCard(filtered) as { msg_type: string; content: string };
+      await client!.im.message.reply({
+        path: { message_id: messageId },
+        data: {
+          msg_type: card.msg_type,
+          content: card.content,
+        },
+      });
+    } catch (err) {
+      // Fallback to plain text if card fails
+      logger.warn({ err }, "Feishu card reply failed, falling back to text");
+      const parts = formatFeishuReply(filtered);
+      for (const part of parts) {
+        await replyFeishuPlainText(messageId, part);
+      }
     }
   };
 
   const sendFile = async (filePath: string, caption?: string) => {
     try {
       const fileName = caption || filePath.split("/").pop() || "file";
-      // Use im.v1.file.create to upload
       const fileStream = createReadStream(filePath);
       const uploadResp = await client!.im.file.create({
         data: {
@@ -231,22 +321,20 @@ export async function handleFeishuEvent(event: any): Promise<void> {
           },
         });
       } else {
-        // Fallback: send file path as text
-        await replyFeishuText(messageId, `📎 File: ${filePath}`);
+        await replyFeishuPlainText(messageId, `📎 File: ${filePath}`);
       }
     } catch (err) {
       logger.error({ err, filePath }, "Failed to send file via Feishu");
-      // Fallback: try to send as text if it's small
       try {
         const stat = statSync(filePath);
         if (stat.size < 50_000) {
           const content = readFileSync(filePath, "utf-8");
-          await replyFeishuText(messageId, `📄 ${filePath}\n\`\`\`\n${content}\n\`\`\``);
+          await replyFeishu(messageId, `📄 ${filePath}\n\`\`\`\n${content}\n\`\`\``);
         } else {
-          await replyFeishuText(messageId, `❌ Failed to send file: ${filePath}`);
+          await replyFeishu(messageId, `❌ Failed to send file: ${filePath}`);
         }
       } catch {
-        await replyFeishuText(messageId, `❌ Failed to send file: ${filePath}`);
+        await replyFeishu(messageId, `❌ Failed to send file: ${filePath}`);
       }
     }
   };
@@ -254,7 +342,27 @@ export async function handleFeishuEvent(event: any): Promise<void> {
   await routeMessage(msg, sendReply, sendFile);
 }
 
-async function replyFeishuText(messageId: string, text: string): Promise<void> {
+/** Send a card message reply (default) */
+async function replyFeishu(messageId: string, text: string): Promise<void> {
+  if (!client) return;
+  try {
+    const card = buildFeishuCard(text) as { msg_type: string; content: string };
+    await client.im.message.reply({
+      path: { message_id: messageId },
+      data: {
+        msg_type: card.msg_type,
+        content: card.content,
+      },
+    });
+  } catch (err) {
+    // Fallback to plain text
+    logger.warn({ err }, "Feishu card reply failed, falling back to text");
+    await replyFeishuPlainText(messageId, text);
+  }
+}
+
+/** Send a plain text message reply (fallback) */
+async function replyFeishuPlainText(messageId: string, text: string): Promise<void> {
   if (!client) return;
   try {
     const payload = buildFeishuTextContent(text) as { msg_type: string; content: string };

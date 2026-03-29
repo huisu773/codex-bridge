@@ -16,6 +16,9 @@ export async function startTelegramBot(): Promise<void> {
   bot.on("message:text", handleTelegramMessage);
   bot.on("message:document", handleTelegramMessage);
   bot.on("message:photo", handleTelegramMessage);
+  bot.on("message:voice", handleTelegramMessage);
+  bot.on("message:audio", handleTelegramMessage);
+  bot.on("message:video_note", handleTelegramMessage);
 
   bot.catch((err) => {
     logger.error({ err: err.error }, "Telegram bot error");
