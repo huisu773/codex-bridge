@@ -23,24 +23,47 @@ export function initFeishuClient(appId: string, appSecret: string): lark.Client 
 // Deduplicate messages (Feishu may retry)
 const processedMessages = new Map<string, number>();
 const DEDUP_TTL = 60_000;
+const DEDUP_MAX_SIZE = 5_000;
 
 function isDuplicate(messageId: string): boolean {
   const now = Date.now();
+  // Prune expired entries
   for (const [id, ts] of processedMessages) {
     if (now - ts > DEDUP_TTL) processedMessages.delete(id);
+  }
+  // Evict oldest if approaching size limit
+  if (processedMessages.size >= DEDUP_MAX_SIZE) {
+    const oldest = processedMessages.keys().next().value;
+    if (oldest) processedMessages.delete(oldest);
   }
   if (processedMessages.has(messageId)) return true;
   processedMessages.set(messageId, now);
   return false;
 }
 
+// Periodic cleanup independent of message flow
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, ts] of processedMessages) {
+    if (now - ts > DEDUP_TTL) processedMessages.delete(id);
+  }
+}, 5 * 60_000);
+
 async function downloadFeishuResource(messageId: string, fileKey: string, type: string): Promise<Buffer> {
   if (!client) throw new Error("Feishu client not initialized");
-  
-  const resp = await client.im.messageResource.get({
+
+  const DOWNLOAD_TIMEOUT = 30_000;
+
+  const downloadPromise = client.im.messageResource.get({
     path: { message_id: messageId, file_key: fileKey },
     params: { type },
   });
+
+  const timeoutPromise = new Promise<never>((_resolve, reject) =>
+    setTimeout(() => reject(new Error(`Feishu resource download timed out after ${DOWNLOAD_TIMEOUT}ms`)), DOWNLOAD_TIMEOUT),
+  );
+
+  const resp = await Promise.race([downloadPromise, timeoutPromise]);
 
   // SDK v1.60 returns { writeFile, getReadableStream, headers }
   if (resp && typeof (resp as any).getReadableStream === "function") {

@@ -318,7 +318,7 @@ export function registerNativeCommands(): void {
         // Streaming support
         let streamMsgId = "";
         let lastStreamUpdate = 0;
-        const STREAM_THROTTLE_MS = 1500; // throttle updates to avoid API rate limits
+        const STREAM_THROTTLE_MS = msg.platform === "feishu" ? 1000 : 500;
 
         // Start streaming if platform supports it
         if (msg.sendStreamStart) {

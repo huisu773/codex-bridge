@@ -6,6 +6,8 @@ import { initFeishuClient, handleFeishuEvent } from "./handler.js";
 
 let wsClient: lark.WSClient | null = null;
 let server: ReturnType<typeof express.application.listen> | null = null;
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
 
 export async function startFeishuBot(): Promise<void> {
   if (
@@ -18,32 +20,7 @@ export async function startFeishuBot(): Promise<void> {
 
   const client = initFeishuClient(config.feishu.appId, config.feishu.appSecret);
 
-  // Use WSClient (WebSocket long connection) — no public URL needed
-  wsClient = new lark.WSClient({
-    appId: config.feishu.appId,
-    appSecret: config.feishu.appSecret,
-    loggerLevel: lark.LoggerLevel.info,
-  });
-
-  const eventDispatcher = new lark.EventDispatcher({}).register({
-    "im.message.receive_v1": async (data: any) => {
-      logger.info(
-        { senderId: data?.sender?.sender_id?.open_id, chatId: data?.message?.chat_id },
-        "Feishu event received via WebSocket",
-      );
-      // Must return within 3 seconds — process asynchronously
-      setImmediate(async () => {
-        try {
-          await handleFeishuEvent(data);
-        } catch (err) {
-          logger.error({ err }, "Error processing Feishu event");
-        }
-      });
-    },
-  });
-
-  await wsClient.start({ eventDispatcher });
-  logger.info("Feishu WebSocket client started (long connection mode)");
+  await connectFeishuWS();
 
   // Still start Express for health check
   const app = express();
@@ -75,7 +52,66 @@ export async function startFeishuBot(): Promise<void> {
   });
 }
 
+async function connectFeishuWS(): Promise<void> {
+  // Use WSClient (WebSocket long connection) — no public URL needed
+  wsClient = new lark.WSClient({
+    appId: config.feishu.appId,
+    appSecret: config.feishu.appSecret,
+    loggerLevel: lark.LoggerLevel.info,
+  });
+
+  const eventDispatcher = new lark.EventDispatcher({}).register({
+    "im.message.receive_v1": async (data: any) => {
+      logger.info(
+        { senderId: data?.sender?.sender_id?.open_id, chatId: data?.message?.chat_id },
+        "Feishu event received via WebSocket",
+      );
+      // Must return within 3 seconds — process asynchronously
+      setImmediate(async () => {
+        try {
+          await handleFeishuEvent(data);
+        } catch (err) {
+          logger.error({ err }, "Error processing Feishu event");
+        }
+      });
+    },
+  });
+
+  try {
+    await wsClient.start({ eventDispatcher });
+    reconnectAttempts = 0;
+    logger.info("Feishu WebSocket client started (long connection mode)");
+  } catch (err) {
+    logger.error({ err }, "Feishu WebSocket start failed");
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect(): void {
+  if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  const backoffMs = Math.min(1000 * Math.pow(2, reconnectAttempts), 60_000);
+  reconnectAttempts++;
+  logger.info({ backoffMs, attempt: reconnectAttempts }, "Scheduling Feishu WS reconnect");
+
+  reconnectTimeout = setTimeout(async () => {
+    try {
+      if (wsClient) {
+        try { wsClient.close(); } catch { /* ignore */ }
+        wsClient = null;
+      }
+      await connectFeishuWS();
+    } catch (err) {
+      logger.error({ err }, "Feishu reconnect failed");
+      scheduleReconnect();
+    }
+  }, backoffMs);
+}
+
 export function stopFeishuBot(): void {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
   if (wsClient) {
     wsClient.close();
     logger.info("Feishu WebSocket client closed");

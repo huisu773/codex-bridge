@@ -33,6 +33,14 @@ export function checkRateLimit(userId: string): boolean {
   return true;
 }
 
+// Periodically prune expired rate-limit entries to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of requestCounts) {
+    if (now > entry.resetAt) requestCounts.delete(key);
+  }
+}, 5 * 60_000);
+
 export function sanitizeInput(input: string): string {
   // Remove null bytes and control characters (except newlines/tabs)
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
