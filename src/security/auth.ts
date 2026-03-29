@@ -30,8 +30,16 @@ export function isAuthorizedFeishu(userId: string): boolean {
   return config.feishu.allowedUserIds.includes(userId);
 }
 
-// Simple in-memory rate limiter
+// Simple in-memory rate limiter with bounded map
+const MAX_RATE_LIMIT_ENTRIES = 10_000;
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
+
+function pruneExpiredEntries(): void {
+  const now = Date.now();
+  for (const [key, entry] of requestCounts) {
+    if (now > entry.resetAt) requestCounts.delete(key);
+  }
+}
 
 export function checkRateLimit(userId: string): boolean {
   const now = Date.now();
@@ -39,6 +47,14 @@ export function checkRateLimit(userId: string): boolean {
   const entry = requestCounts.get(userId);
 
   if (!entry || now > entry.resetAt) {
+    // Evict expired entries if approaching capacity
+    if (requestCounts.size >= MAX_RATE_LIMIT_ENTRIES) {
+      pruneExpiredEntries();
+      if (requestCounts.size >= MAX_RATE_LIMIT_ENTRIES) {
+        logger.warn({ size: requestCounts.size }, "Rate limit map at capacity after prune");
+        return false;
+      }
+    }
     requestCounts.set(userId, { count: 1, resetAt: now + 60_000 });
     return true;
   }
@@ -52,13 +68,8 @@ export function checkRateLimit(userId: string): boolean {
   return true;
 }
 
-// Periodically prune expired rate-limit entries to prevent unbounded growth
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of requestCounts) {
-    if (now > entry.resetAt) requestCounts.delete(key);
-  }
-}, 5 * 60_000);
+// Prune expired entries every minute
+setInterval(pruneExpiredEntries, 60_000);
 
 export function sanitizeInput(input: string): string {
   // Remove null bytes and control characters (except newlines/tabs)
