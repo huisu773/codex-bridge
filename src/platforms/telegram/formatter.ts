@@ -47,16 +47,19 @@ export function markdownToTelegramHtml(text: string): string {
   result = escapeHtml(result);
 
   // Step 4: Convert markdown formatting
+  // Bold+italic: ***text*** (must come before bold and italic)
+  result = result.replace(/\*\*\*(.+?)\*\*\*/g, "<b><i>$1</i></b>");
+
   // Bold: **text** or __text__
   result = result.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   result = result.replace(/__(.+?)__/g, "<b>$1</b>");
 
-  // Italic: *text* or _text_ (not within words)
-  result = result.replace(/(?<![\\*\w])\*([^*\n]+)\*(?!\w)/g, "<i>$1</i>");
-  result = result.replace(/(?<![\\_ \w])_([^_\n]+)_(?!\w)/g, "<i>$1</i>");
+  // Italic: *text* or _text_ (don't match across HTML tags from bold conversion)
+  result = result.replace(/(?<![\\*\w])\*([^*\n<>]+)\*(?!\w)/g, "<i>$1</i>");
+  result = result.replace(/(?<![\\_ \w])_([^_\n<>]+)_(?!\w)/g, "<i>$1</i>");
 
   // Strikethrough: ~~text~~
-  result = result.replace(/~~(.+?)~~/g, "<s>$1</s>");
+  result = result.replace(/~~([^~<>]+?)~~/g, "<s>$1</s>");
 
   // Links: [text](url) — encode quotes in URL to prevent attribute breakout
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, linkText, url) => {
