@@ -2,11 +2,11 @@ import { type Context } from "grammy";
 import { routeMessage } from "../../core/command-router.js";
 import { isAuthorizedTelegram, checkRateLimit, sanitizeInput, filterSensitiveOutput } from "../../security/auth.js";
 import { logger } from "../../utils/logger.js";
-import { formatTelegramReply, formatTelegramStream, escapeHtml } from "./formatter.js";
+import { formatTelegramReply, formatTelegramStream } from "./formatter.js";
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
 import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
-import { join, basename } from "node:path";
+import { basename } from "node:path";
 import { createReadStream } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 import { InputFile } from "grammy";
@@ -86,7 +86,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
         const sttResult = await transcribe(savedPath, config.stt as STTConfig);
         if (sttResult.success && sttResult.text) {
           voiceTranscription = sttResult.text;
-          await ctx.reply(`🎤 <i>Voice transcribed:</i>\n${escapeHtml(sttResult.text)}`, { parse_mode: "HTML" });
+          await ctx.reply(`🎤 Voice transcribed:\n${sttResult.text}`);
         } else {
           await ctx.reply(`🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
         }
@@ -147,35 +147,22 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     chatId: String(chatId),
     text: finalText,
     files,
-    // Streaming callbacks for real-time message updates
+    // Streaming callbacks — plain text only
     sendStreamStart: async (initText: string): Promise<string> => {
       const sent = await ctx.reply(initText);
       return String(sent.message_id);
     },
     updateStream: async (msgId: string, updatedText: string): Promise<void> => {
       try {
-        const html = formatTelegramStream(updatedText);
-        await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
-      } catch (err) {
-        logger.warn({ err }, "Telegram stream HTML update failed, retrying plain");
-        try {
-          // Strip markdown syntax for readable plain-text fallback
-          const plain = updatedText.replace(/[*_~`#>|]/g, "").slice(0, 4096);
-          await ctx.api.editMessageText(chatId, Number(msgId), plain);
-        } catch { /* edit failures often expected during streaming */ }
-      }
+        const plain = formatTelegramStream(updatedText);
+        await ctx.api.editMessageText(chatId, Number(msgId), plain);
+      } catch { /* edit failures often expected during streaming */ }
     },
     finalizeStream: async (msgId: string, finalText: string): Promise<void> => {
       try {
-        const html = formatTelegramStream(finalText);
-        await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
-      } catch (err) {
-        logger.warn({ err }, "Telegram stream HTML finalize failed, retrying plain");
-        try {
-          const plain = finalText.replace(/[*_~`#>|]/g, "").slice(0, 4096);
-          await ctx.api.editMessageText(chatId, Number(msgId), plain);
-        } catch { /* ignore */ }
-      }
+        const plain = formatTelegramStream(finalText);
+        await ctx.api.editMessageText(chatId, Number(msgId), plain);
+      } catch { /* ignore */ }
     },
   };
 
@@ -186,15 +173,9 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     const parts = formatTelegramReply(filtered);
     for (const part of parts) {
       try {
-        await ctx.reply(part, { parse_mode: "HTML" });
+        await ctx.reply(part);
       } catch (err) {
-        logger.warn({ err }, "Telegram HTML reply failed, retrying as plain text");
-        try {
-          // Strip HTML tags from the failed part and send as plain text
-          await ctx.reply(part.replace(/<[^>]+>/g, "").slice(0, 4096));
-        } catch (innerErr) {
-          logger.error({ err: innerErr }, "Telegram plain text reply also failed");
-        }
+        logger.error({ err }, "Telegram reply failed");
       }
     }
   };

@@ -10,11 +10,12 @@
 - ⚡ **Full Codex Power**: Wraps `codex exec` directly — all Codex capabilities available
 - 🔐 **Secure**: User ID whitelist + rate limiting + sensitive output filtering
 - 📂 **Session Management**: Per-session directories with full conversation + file tracking
-- 📎 **File I/O**: Upload/download files through chat; auto-sends files created by Codex
+- 📎 **File I/O**: Upload files through chat; files created by Codex are saved in session and reported
 - 🖼️ **Image Input**: Send images for Codex to analyze (via `-i` flag)
-- 🎤 **Voice Messages**: Receive and save voice messages from both platforms
+- 🎤 **Voice Messages**: Auto-transcribed to text (STT) and sent to Codex
 - 🧠 **File Context Awareness**: Upload a file → Codex automatically knows about it in your next message
-- 🔧 **Extensible Commands**: Built-in + custom commands, easy to add more
+- 📡 **Streaming**: Real-time streaming responses with progress indicators
+- 🔧 **Extensible Commands**: Built-in + custom commands with Telegram autocomplete sync
 - 🚀 **systemd Service**: Auto-start on boot, managed as a system daemon
 
 ## Quick Start
@@ -63,9 +64,9 @@ All configuration is via environment variables in `.env`:
 | `FEISHU_VERIFICATION_TOKEN` | | Feishu verification token |
 | `FEISHU_ENCRYPT_KEY` | | Feishu encrypt key |
 | `CODEX_MODEL` | | Model name (default: `gpt-5.3-codex`) |
-| `CODEX_WORKING_DIR` | | Working directory (default: project root) |
+| `CODEX_WORKING_DIR` | | Working directory (default: `~/codex-workspace`) |
 | `CODEX_BIN` | | Path to codex binary (auto-detected) |
-| `SESSION_DIR` | | Session storage path |
+| `SESSION_DIR` | | Session storage path (default: `~/codex-workspace/sessions`) |
 | `WEBHOOK_PORT` | | Health check port (default: `9800`) |
 | `RATE_LIMIT_PER_MINUTE` | | Max requests per minute (default: `30`) |
 | `STT_PROVIDER` | | Voice transcription: `groq` / `openai` / `openrouter` / `local` / `none` |
@@ -118,9 +119,11 @@ Send any message without a `/` prefix to chat with Codex directly. Codex execute
 
 ### File Workflow
 
-1. **Send a file** in chat (with or without `/upload`) → saved to session + working directory
+1. **Send a file** in chat → saved to session `received/` directory
 2. **Ask Codex** about the file in your next message → Codex automatically receives the file path context
-3. **Files created by Codex** are auto-sent back to you in chat
+3. **Files created by Codex** are saved to session `generated/` directory and reported in the reply
+
+> Files are stored in session directories, not the workspace root. Codex only sends files back to chat when you explicitly request it.
 
 ### Image & Voice
 
@@ -146,12 +149,17 @@ Chat Message → Platform Handler → Auth Check → Command Router
                                                     ↓
                                               Session Recording
                                                     ↓
-                                              Format & Reply ← Auto-send new files
+                                              Format & Reply
 ```
+
+### Platform Formatting
+
+- **Feishu**: Rich formatting via `lark_md` (bold, code, links, lists) with streaming card updates
+- **Telegram**: Plain text output for maximum compatibility; slash commands auto-synced to menu
 
 ## Session Storage
 
-Each session is stored in `SESSION_DIR/{date}-{platform}-{hash}/`:
+Each session is stored in `SESSION_DIR/{date}-{platform}-{hash}/`. Using `/new` creates a new session folder while preserving the previous one on disk.
 
 ```
 2026-03-29-telegram-8e35d1b8/

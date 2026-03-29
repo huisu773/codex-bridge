@@ -1,4 +1,8 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+
+// Load .env with override=true so project .env always takes priority
+// over system environment variables (prevents token confusion with other bots)
+dotenv.config({ override: true });
 
 export interface Config {
   telegram: {

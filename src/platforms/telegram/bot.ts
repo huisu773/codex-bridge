@@ -2,6 +2,7 @@ import { Bot } from "grammy";
 import { config } from "../../config.js";
 import { logger } from "../../utils/logger.js";
 import { handleTelegramMessage } from "./handler.js";
+import { getUniqueCommands } from "../../commands/registry.js";
 
 let bot: Bot | null = null;
 
@@ -23,6 +24,18 @@ export async function startTelegramBot(): Promise<void> {
   bot.catch((err) => {
     logger.error({ err: err.error }, "Telegram bot error");
   });
+
+  // Sync slash commands with Telegram's autocomplete menu
+  try {
+    const cmds = getUniqueCommands().map((c) => ({
+      command: c.name,
+      description: c.description,
+    }));
+    await bot.api.setMyCommands(cmds);
+    logger.info({ count: cmds.length }, "Telegram slash commands synced");
+  } catch (err) {
+    logger.warn({ err }, "Failed to sync Telegram slash commands");
+  }
 
   // Use long polling
   await bot.start({
