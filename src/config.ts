@@ -25,7 +25,6 @@ export interface Config {
     workingDir: string;
     bin: string;
     timeoutMs: number;
-    maxTimeoutMs: number;
   };
   session: {
     dir: string;
@@ -104,7 +103,6 @@ export function loadConfig(): Config {
       workingDir: resolvePath(optional("CODEX_WORKING_DIR", `${HOME}/codex-workspace`)),
       bin: optional("CODEX_BIN", "/usr/bin/codex"),
       timeoutMs: Number(optional("CODEX_TIMEOUT_MS", "300000")),
-      maxTimeoutMs: Number(optional("CODEX_MAX_TIMEOUT_MS", "1800000")),
     },
     session: {
       dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),

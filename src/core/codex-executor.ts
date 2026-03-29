@@ -123,7 +123,6 @@ export async function executeCodex(
   const model = opts.model || config.codex.model;
   const workDir = opts.workingDir || config.codex.workingDir;
   const baseTimeout = opts.timeoutMs || config.codex.timeoutMs;
-  const maxTimeout = config.codex.maxTimeoutMs;
   const EXTEND_INTERVAL = 120_000; // Extend by 2 min each time
 
   const beforeSnap = snapshotDir(workDir);
@@ -226,7 +225,7 @@ export async function executeCodex(
       lastActivityTime = Date.now();
     });
 
-    // Adaptive timeout: extend if Codex is still producing output
+    // Adaptive timeout: never time out while Codex is actively producing output
     let currentDeadline = start + baseTimeout;
     const ACTIVITY_WINDOW = 60_000; // Consider "active" if output within last 60s
 
@@ -235,26 +234,21 @@ export async function executeCodex(
       const now = Date.now();
       if (now < currentDeadline) return; // Not yet at deadline
 
-      const elapsed = now - start;
       const recentlyActive = (now - lastActivityTime) < ACTIVITY_WINDOW;
 
-      if (recentlyActive && elapsed < maxTimeout) {
-        // Still active and under max timeout — extend
+      if (recentlyActive) {
+        // Still active — keep extending, no upper limit
         currentDeadline = now + EXTEND_INTERVAL;
-        logger.info(
-          { elapsed: Math.round(elapsed / 1000), nextDeadline: Math.round((currentDeadline - start) / 1000) },
-          "Codex still active, extending timeout",
-        );
+        const elapsed = Math.round((now - start) / 1000);
+        logger.info({ elapsed }, "Codex still active, extending timeout");
         return;
       }
 
-      // Deadline reached and no recent activity (or max timeout hit)
+      // Deadline reached and no recent activity — timed out
       clearInterval(adaptiveTimer);
       timedOut = true;
-      logger.warn(
-        { elapsed: Math.round(elapsed / 1000), maxTimeout: Math.round(maxTimeout / 1000), recentlyActive },
-        "Codex execution timed out",
-      );
+      const elapsed = Math.round((now - start) / 1000);
+      logger.warn({ elapsed }, "Codex execution timed out (no recent activity)");
       proc.kill("SIGTERM");
       setTimeout(() => {
         if (!proc.killed) proc.kill("SIGKILL");
