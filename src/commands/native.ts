@@ -9,7 +9,6 @@ import {
   listAllSessions,
   appendConversation,
   saveGeneratedFile,
-  recordFileSent,
   consumePendingFiles,
 } from "../core/session-manager.js";
 import {
@@ -20,7 +19,6 @@ import {
 import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { basename } from "node:path";
 import type { PlatformMessage } from "../platforms/types.js";
 
 // Per-chat task queue for parallel execution across chats
@@ -385,13 +383,29 @@ export function registerNativeCommands(): void {
             },
           });
 
-          // Final response: if we were streaming, update the stream message with final content
-          if (streamMsgId && msg.updateStream && result.output) {
-            try {
-              await msg.updateStream(streamMsgId, result.output);
-            } catch {
-              // If stream update fails, send as new message
+          // Final response: finalize the stream card (removes "Generating..." indicator)
+          if (streamMsgId && result.output) {
+            const finalize = msg.finalizeStream || msg.updateStream;
+            if (finalize) {
+              try {
+                await finalize(streamMsgId, result.output);
+              } catch {
+                // If stream finalize fails, send as new message
+                await sendReply(result.output);
+              }
+            } else {
               await sendReply(result.output);
+            }
+          } else if (streamMsgId && !result.output) {
+            // No output but stream card exists — finalize to remove "Generating..."
+            const statusMsg = result.success
+              ? "✅ Done (no output)."
+              : `❌ Codex exited with code ${result.exitCode}.`;
+            const finalize = msg.finalizeStream || msg.updateStream;
+            if (finalize) {
+              await finalize(streamMsgId, statusMsg).catch(() => {});
+            } else {
+              await sendReply(statusMsg);
             }
           } else if (result.output) {
             await sendReply(result.output);
@@ -399,41 +413,39 @@ export function registerNativeCommands(): void {
             const statusMsg = result.success
               ? "✅ Done (no output)."
               : `❌ Codex exited with code ${result.exitCode}.`;
-            if (streamMsgId && msg.updateStream) {
-              await msg.updateStream(streamMsgId, statusMsg).catch(() => {});
-            } else {
-              await sendReply(statusMsg);
-            }
+            await sendReply(statusMsg);
           }
 
-          // Auto-save generated files to session folder and send to user
+          // Save generated files to session folder (no auto-send to user)
           if (result.newFiles.length > 0) {
-            const MAX_AUTO_SEND = 10;
+            let savedCount = 0;
             const MAX_FILE_SIZE = 50 * 1024 * 1024;
-            const filesToSend = result.newFiles.slice(0, MAX_AUTO_SEND);
-            for (const filePath of filesToSend) {
+            for (const filePath of result.newFiles) {
               try {
                 if (!existsSync(filePath)) continue;
                 const stat = statSync(filePath);
                 if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
                 saveGeneratedFile(session, filePath, msg.platform);
-                await sendFile(filePath, basename(filePath));
-                recordFileSent(session, filePath, msg.platform);
+                savedCount++;
               } catch {
-                // Ignore individual file send errors
+                // Ignore individual file save errors
               }
             }
-            if (result.newFiles.length > MAX_AUTO_SEND) {
-              await sendReply(
-                `📁 ${result.newFiles.length} files created/modified, sent first ${MAX_AUTO_SEND}.`,
-              );
+            if (savedCount > 0) {
+              await sendReply(`📁 ${savedCount} file(s) created/modified and saved to session.`);
             }
           }
         } catch (err) {
           clearInterval(heartbeatInterval);
           const errMsg = `❌ Execution error: ${err instanceof Error ? err.message : String(err)}`;
-          if (streamMsgId && msg.updateStream) {
-            await msg.updateStream(streamMsgId, errMsg).catch(() => {});
+          // Always try to finalize stream card to remove "Generating..." indicator
+          if (streamMsgId) {
+            const errFinalize = msg.finalizeStream || msg.updateStream;
+            if (errFinalize) {
+              await errFinalize(streamMsgId, errMsg).catch(() => {});
+            } else {
+              await sendReply(errMsg);
+            }
           } else {
             await sendReply(errMsg);
           }

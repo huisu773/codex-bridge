@@ -16,14 +16,16 @@ export function escapeHtml(text: string): string {
 
 /**
  * Convert Codex markdown output to Telegram HTML format.
- * Handles: code blocks, inline code, bold, italic, strikethrough, links, headers.
+ * Handles: code blocks, inline code, bold, italic, strikethrough,
+ * links, headers, lists, blockquotes, and horizontal rules.
  */
 export function markdownToTelegramHtml(text: string): string {
   const codeBlocks: string[] = [];
   const inlineCodes: string[] = [];
 
   // Step 1: Extract fenced code blocks → placeholders
-  let result = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, lang, code) => {
+  // Support both ```lang\n...\n``` and ```lang ...``` (single line)
+  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang, code) => {
     const idx = codeBlocks.length;
     const escaped = escapeHtml(code.trimEnd());
     codeBlocks.push(
@@ -62,8 +64,33 @@ export function markdownToTelegramHtml(text: string): string {
     return `<a href="${safeUrl}">${linkText}</a>`;
   });
 
-  // Headers: # text → bold
+  // Image links → regular links
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, url) => {
+    const safeUrl = url.replace(/"/g, "%22");
+    return `<a href="${safeUrl}">${alt || "image"}</a>`;
+  });
+
+  // Headers: # text → bold with newline
   result = result.replace(/^#{1,6}\s+(.+)$/gm, "\n<b>$1</b>");
+
+  // Blockquotes: > text → <blockquote>
+  // Collect consecutive blockquote lines into one block
+  result = result.replace(
+    /(?:^&gt;\s?(.*)$\n?)+/gm,
+    (match) => {
+      const lines = match
+        .split("\n")
+        .map((l) => l.replace(/^&gt;\s?/, ""))
+        .filter((l) => l !== undefined);
+      return `<blockquote>${lines.join("\n")}</blockquote>`;
+    },
+  );
+
+  // Horizontal rules → visual separator
+  result = result.replace(/^[-*_]{3,}\s*$/gm, "————————————");
+
+  // Unordered lists: - or * at line start → bullet
+  result = result.replace(/^(\s*)[-*]\s+/gm, "$1• ");
 
   // Step 5: Restore code blocks and inline code
   result = result.replace(/\x00CB(\d+)\x00/g, (_m, idx) => codeBlocks[Number(idx)]);

@@ -56,6 +56,14 @@ function optional(key: string, fallback: string): string {
   return process.env[key] || fallback;
 }
 
+/** Expand ~ to $HOME in paths */
+function resolvePath(p: string): string {
+  const HOME = process.env.HOME || "/root";
+  if (p.startsWith("~/")) return HOME + p.slice(1);
+  if (p === "~") return HOME;
+  return p;
+}
+
 function parseIds(raw: string): string[] {
   return raw
     .split(",")
@@ -68,6 +76,7 @@ function parseNumericIds(raw: string): number[] {
 }
 
 export function loadConfig(): Config {
+  const HOME = process.env.HOME || "/root";
   return {
     telegram: {
       botToken: required("TELEGRAM_BOT_TOKEN"),
@@ -86,11 +95,11 @@ export function loadConfig(): Config {
     },
     codex: {
       model: optional("CODEX_MODEL", "gpt-5.3-codex"),
-      workingDir: optional("CODEX_WORKING_DIR", "/root/codex-workspace"),
+      workingDir: resolvePath(optional("CODEX_WORKING_DIR", `${HOME}/codex-workspace`)),
       bin: optional("CODEX_BIN", "/usr/bin/codex"),
     },
     session: {
-      dir: optional("SESSION_DIR", "/root/codex-workspace/sessions"),
+      dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),
       maxAgeHours: Number(optional("SESSION_MAX_AGE_HOURS", "168")),
     },
     security: {
@@ -110,7 +119,7 @@ export function loadConfig(): Config {
     },
     log: {
       level: optional("LOG_LEVEL", "info"),
-      file: optional("LOG_FILE", "./logs/codex-bridge.log"),
+      file: resolvePath(optional("LOG_FILE", "./logs/codex-bridge.log")),
     },
   };
 }

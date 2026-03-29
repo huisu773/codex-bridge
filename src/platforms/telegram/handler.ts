@@ -6,9 +6,8 @@ import { formatTelegramReply, formatTelegramStream, escapeHtml } from "./formatt
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
 import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
-import { nowISO } from "../../utils/helpers.js";
 import { join, basename } from "node:path";
-import { writeFileSync, createReadStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 import { InputFile } from "grammy";
 
@@ -82,10 +81,9 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
       try {
         const session = getOrCreateSession("telegram", String(chatId), String(userId));
         const buf = await downloadTelegramFile(ctx, voice.file_id);
-        saveReceivedFile(session, fileName, buf, "telegram");
-        const workPath = join(session.workingDir, fileName);
-        logger.info({ workPath, provider: config.stt.provider }, "Starting voice transcription");
-        const sttResult = await transcribe(workPath, config.stt as STTConfig);
+        const savedPath = saveReceivedFile(session, fileName, buf, "telegram");
+        logger.info({ savedPath, provider: config.stt.provider }, "Starting voice transcription");
+        const sttResult = await transcribe(savedPath, config.stt as STTConfig);
         if (sttResult.success && sttResult.text) {
           voiceTranscription = sttResult.text;
           await ctx.reply(`🎤 <i>Voice transcribed:</i>\n${escapeHtml(sttResult.text)}`, { parse_mode: "HTML" });

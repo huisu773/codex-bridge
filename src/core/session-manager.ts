@@ -230,6 +230,8 @@ export function saveGeneratedFile(
 
 /**
  * Save a file received from the user into the session's received/ folder.
+ * Files are stored ONLY in the session directory (not in the global workingDir).
+ * Codex accesses them via absolute path.
  */
 export function saveReceivedFile(
   session: Session,
@@ -242,10 +244,6 @@ export function saveReceivedFile(
   const dest = join(destDir, fileName);
   writeFileSync(dest, buffer);
 
-  // Also copy to working directory so Codex can access it
-  const workCopy = join(session.workingDir, fileName);
-  writeFileSync(workCopy, buffer);
-
   const record: FileRecord = {
     timestamp: nowISO(),
     type: "received",
@@ -257,9 +255,9 @@ export function saveReceivedFile(
   };
   recordFile(session, record);
   session.stats.totalReceivedFiles++;
-  // Track as pending so next Codex call includes file context
+  // Track as pending so next Codex call includes file context (absolute path)
   if (!session.pendingFiles) session.pendingFiles = [];
-  session.pendingFiles.push(workCopy);
+  session.pendingFiles.push(dest);
   session.updatedAt = nowISO();
   saveMeta(session);
   return dest;

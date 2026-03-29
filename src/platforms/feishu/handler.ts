@@ -6,9 +6,7 @@ import { formatFeishuReply, buildFeishuTextContent, buildFeishuCard, buildFeishu
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
 import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
-import { nowISO } from "../../utils/helpers.js";
-import { join } from "node:path";
-import { writeFileSync, createReadStream, readFileSync, statSync, existsSync } from "node:fs";
+import { createReadStream, readFileSync, statSync, existsSync } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 
 let client: lark.Client | null = null;
@@ -164,10 +162,9 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       const session = getOrCreateSession("feishu", chatId, senderId);
       const f = files[0];
       const buf = await f.getBuffer();
-      saveReceivedFile(session, f.name, buf, "feishu");
-      const workPath = join(session.workingDir, f.name);
-      logger.info({ workPath, provider: config.stt.provider }, "Starting Feishu voice transcription");
-      const sttResult = await transcribe(workPath, config.stt as STTConfig);
+      const savedPath = saveReceivedFile(session, f.name, buf, "feishu");
+      logger.info({ savedPath, provider: config.stt.provider }, "Starting Feishu voice transcription");
+      const sttResult = await transcribe(savedPath, config.stt as STTConfig);
       if (sttResult.success && sttResult.text) {
         voiceTranscription = sttResult.text;
         await replyFeishu(messageId, `🎤 Voice transcribed:\n${sttResult.text}`);
@@ -244,6 +241,20 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       } catch (err) {
         // Card update can fail if content unchanged
         logger.debug({ err }, "Feishu stream update failed (may be expected)");
+      }
+    },
+    finalizeStream: async (msgId: string, finalText: string): Promise<void> => {
+      if (!msgId) return;
+      try {
+        const card = buildFeishuStreamCard(finalText, true);
+        await client!.im.message.patch({
+          path: { message_id: msgId },
+          data: {
+            content: JSON.stringify(card),
+          },
+        });
+      } catch (err) {
+        logger.debug({ err }, "Feishu stream finalize failed (may be expected)");
       }
     },
   };

@@ -4,7 +4,11 @@ const FEISHU_MAX_LEN = 30000;
 
 /**
  * Convert standard markdown to Feishu lark_md format.
- * lark_md doesn't support # headers or ![image] syntax — convert them.
+ * lark_md supports: **bold**, *italic*, ~~strike~~, [link](url),
+ * `inline code`, and ``` code blocks.
+ * It does NOT support: # headers, images, bullet/numbered lists,
+ * blockquotes, horizontal rules, or tables.
+ * We convert unsupported syntax to visual equivalents.
  */
 export function markdownToLarkMd(text: string): string {
   // Protect code blocks from transformation
@@ -15,13 +19,34 @@ export function markdownToLarkMd(text: string): string {
     return `\x00FSCB${idx}\x00`;
   });
 
+  // Protect inline code
+  const inlineCodes: string[] = [];
+  result = result.replace(/`([^`\n]+)`/g, (match) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(match);
+    return `\x00FSIC${idx}\x00`;
+  });
+
   // Headers → bold (lark_md has no header support)
   result = result.replace(/^#{1,6}\s+(.+)$/gm, "**$1**");
 
-  // Image links → regular links (lark_md has no inline image support)
+  // Image links → regular links
   result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "[$1]($2)");
 
-  // Restore code blocks
+  // Blockquotes → indented with "┃ " prefix
+  result = result.replace(/^>\s?(.*)$/gm, "┃ $1");
+
+  // Horizontal rules → visual separator
+  result = result.replace(/^[-*_]{3,}\s*$/gm, "────────────────────");
+
+  // Unordered lists: normalize - and * bullets to •
+  result = result.replace(/^(\s*)[-*]\s+/gm, "$1• ");
+
+  // Ordered lists: keep numbers, add proper formatting
+  result = result.replace(/^(\s*)(\d+)\.\s+/gm, "$1$2. ");
+
+  // Restore inline code and code blocks
+  result = result.replace(/\x00FSIC(\d+)\x00/g, (_m, idx) => inlineCodes[Number(idx)]);
   result = result.replace(/\x00FSCB(\d+)\x00/g, (_m, idx) => codeBlocks[Number(idx)]);
 
   return result;

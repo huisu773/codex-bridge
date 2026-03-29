@@ -8,6 +8,7 @@ export interface PlatformMessage {
   // Streaming support: platform provides these for real-time message updates
   sendStreamStart?: (text: string) => Promise<string>; // returns messageId
   updateStream?: (msgId: string, text: string) => Promise<void>;
+  finalizeStream?: (msgId: string, text: string) => Promise<void>;
 }
 
 export interface PlatformFile {

@@ -34,9 +34,10 @@ export interface RealUsageStats {
   weeklyResetAt: Date;
 }
 
-const CODEX_STATE_DB = join(process.env.HOME || "/root", ".codex", "state_5.sqlite");
+const HOME = process.env.HOME || "/root";
+const CODEX_STATE_DB = join(HOME, ".codex", "state_5.sqlite");
 
-const AUTH_FILE = join(process.env.HOME || "/root", ".codex", "auth.json");
+const AUTH_FILE = join(HOME, ".codex", "auth.json");
 
 export function getRealUsageStats(): RealUsageStats {
   const now = Math.floor(Date.now() / 1000);
