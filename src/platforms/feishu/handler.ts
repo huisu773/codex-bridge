@@ -39,69 +39,39 @@ function isDuplicate(messageId: string): boolean {
 async function downloadFeishuResource(messageId: string, fileKey: string, type: string): Promise<Buffer> {
   if (!client) throw new Error("Feishu client not initialized");
   
-  try {
-    const resp = await client.im.messageResource.get({
-      path: { message_id: messageId, file_key: fileKey },
-      params: { type },
-    });
+  const resp = await client.im.messageResource.get({
+    path: { message_id: messageId, file_key: fileKey },
+    params: { type },
+  });
 
-    // The SDK may return different types depending on version:
-    // 1. Buffer directly
-    if (Buffer.isBuffer(resp)) return resp;
-    // 2. ArrayBuffer
-    if (resp instanceof ArrayBuffer) return Buffer.from(resp);
-    // 3. Axios response with data property
-    if (resp && typeof resp === "object") {
-      const data = (resp as any).data;
-      if (Buffer.isBuffer(data)) return data;
-      if (data instanceof ArrayBuffer) return Buffer.from(data);
-      // Stream in data property
-      if (data && typeof data[Symbol.asyncIterator] === "function") {
-        const chunks: Buffer[] = [];
-        for await (const chunk of data) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        return Buffer.concat(chunks);
-      }
-      // data might be a Node.js Readable stream (pipe-based)
-      if (data && typeof data.read === "function") {
-        return await new Promise<Buffer>((resolve, reject) => {
-          const chunks: Buffer[] = [];
-          data.on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-          data.on("end", () => resolve(Buffer.concat(chunks)));
-          data.on("error", reject);
-        });
-      }
+  // SDK v1.60 returns { writeFile, getReadableStream, headers }
+  if (resp && typeof (resp as any).getReadableStream === "function") {
+    const stream = (resp as any).getReadableStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
-    // 4. Try as async iterable directly  
-    if (resp && typeof (resp as any)[Symbol.asyncIterator] === "function") {
-      const chunks: Buffer[] = [];
-      for await (const chunk of resp as any) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      return Buffer.concat(chunks);
-    }
-    // 5. Try as Node.js Readable stream
-    if (resp && typeof (resp as any).read === "function") {
-      return await new Promise<Buffer>((resolve, reject) => {
-        const chunks: Buffer[] = [];
-        (resp as any).on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        (resp as any).on("end", () => resolve(Buffer.concat(chunks)));
-        (resp as any).on("error", reject);
-      });
-    }
-
-    logger.warn({ type: typeof resp, keys: Object.keys(resp || {}) }, "Unknown Feishu resource response format");
-    throw new Error("Cannot read Feishu resource response");
-  } catch (err: any) {
-    // If it's an Axios error with response data (binary), try to extract it
-    if (err.response?.data) {
-      const data = err.response.data;
-      if (Buffer.isBuffer(data)) return data;
-      if (data instanceof ArrayBuffer) return Buffer.from(data);
-    }
-    throw err;
+    return Buffer.concat(chunks);
   }
+
+  // Fallback: Buffer directly
+  if (Buffer.isBuffer(resp)) return resp;
+  if (resp instanceof ArrayBuffer) return Buffer.from(resp);
+  
+  // Fallback: Axios response with data
+  const data = (resp as any)?.data;
+  if (Buffer.isBuffer(data)) return data;
+  if (data && typeof data.getReadableStream === "function") {
+    const stream = data.getReadableStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  logger.warn({ type: typeof resp, keys: Object.keys(resp || {}) }, "Unknown Feishu resource response format");
+  throw new Error("Cannot read Feishu resource response");
 }
 
 export async function handleFeishuEvent(event: any): Promise<void> {
