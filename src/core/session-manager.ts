@@ -117,6 +117,21 @@ export function deleteSession(
   return true;
 }
 
+/**
+ * Deactivate the current session without deleting its data from disk.
+ * Used by /new to preserve old session history.
+ */
+export function deactivateSession(
+  platform: "telegram" | "feishu",
+  chatId: string,
+): boolean {
+  const session = getSession(platform, chatId);
+  if (!session) return false;
+  activeSessions.delete(chatKey(platform, chatId));
+  logger.info({ sessionId: session.id }, "Session deactivated (data preserved)");
+  return true;
+}
+
 export function updateSessionModel(
   session: Session,
   model: string,

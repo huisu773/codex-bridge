@@ -4,6 +4,7 @@ import {
   getSession,
   getOrCreateSession,
   deleteSession,
+  deactivateSession,
   updateSessionModel,
   updateCodexSessionId,
   listAllSessions,
@@ -108,7 +109,8 @@ export function registerNativeCommands(): void {
     description: "Start a new Codex session",
     usage: "/new",
     execute: async (msg, _args, sendReply) => {
-      deleteSession(msg.platform, msg.chatId);
+      // Deactivate current session (preserve data on disk)
+      deactivateSession(msg.platform, msg.chatId);
       const session = createSession(msg.platform, msg.chatId, msg.userId);
       await sendReply(
         `🆕 New session created: ${session.id}\n` +

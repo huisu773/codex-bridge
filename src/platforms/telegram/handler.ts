@@ -157,9 +157,11 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
         const html = formatTelegramStream(updatedText);
         await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
       } catch (err) {
-        logger.debug({ err }, "Telegram stream HTML update failed, retrying plain");
+        logger.warn({ err }, "Telegram stream HTML update failed, retrying plain");
         try {
-          await ctx.api.editMessageText(chatId, Number(msgId), updatedText.slice(0, 4096));
+          // Strip markdown syntax for readable plain-text fallback
+          const plain = updatedText.replace(/[*_~`#>|]/g, "").slice(0, 4096);
+          await ctx.api.editMessageText(chatId, Number(msgId), plain);
         } catch { /* edit failures often expected during streaming */ }
       }
     },
@@ -168,9 +170,10 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
         const html = formatTelegramStream(finalText);
         await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
       } catch (err) {
-        logger.debug({ err }, "Telegram stream HTML finalize failed, retrying plain");
+        logger.warn({ err }, "Telegram stream HTML finalize failed, retrying plain");
         try {
-          await ctx.api.editMessageText(chatId, Number(msgId), finalText.slice(0, 4096));
+          const plain = finalText.replace(/[*_~`#>|]/g, "").slice(0, 4096);
+          await ctx.api.editMessageText(chatId, Number(msgId), plain);
         } catch { /* ignore */ }
       }
     },
