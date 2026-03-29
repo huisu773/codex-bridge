@@ -102,9 +102,6 @@ All configuration is via environment variables in `.env`:
 | Command | Description |
 |---------|-------------|
 | `/exec <cmd>` | Execute a shell command |
-| `/file <path>` | Read and send a file's content |
-| `/download <path>` | Send a file as attachment |
-| `/upload` | Upload a file (send as attachment with this command) |
 | `/cd <dir>` | Change Codex working directory |
 | `/config` | View runtime configuration |
 | `/help` | List all commands |
