@@ -68,6 +68,10 @@ All configuration is via environment variables in `.env`:
 | `SESSION_DIR` | | Session storage path |
 | `WEBHOOK_PORT` | | Health check port (default: `9800`) |
 | `RATE_LIMIT_PER_MINUTE` | | Max requests per minute (default: `30`) |
+| `STT_PROVIDER` | | Voice transcription: `groq` / `openai` / `openrouter` / `local` / `none` |
+| `STT_API_KEY` | | API key for STT provider |
+| `STT_MODEL` | | STT model (default varies by provider) |
+| `STT_LANGUAGE` | | Language hint for transcription (e.g. `zh`, `en`) |
 | `LOG_LEVEL` | | `debug` / `info` / `warn` / `error` |
 
 ### Feishu Setup
@@ -121,7 +125,17 @@ Send any message without a `/` prefix to chat with Codex directly. Codex execute
 ### Image & Voice
 
 - **Send an image**: Codex receives it via the `-i` flag for visual analysis
-- **Send a voice message**: Audio file is saved to the working directory for Codex to process
+- **Send a voice message**: Automatically transcribed to text (if STT configured) and sent to Codex
+
+#### STT Provider Setup
+
+| Provider | API Key | Default Model | Notes |
+|----------|---------|---------------|-------|
+| `groq` | Groq API key | `whisper-large-v3-turbo` | Fast, free tier available |
+| `openai` | OpenAI API key | `whisper-1` | Official OpenAI |
+| `openrouter` | OpenRouter key | `openai/whisper-large-v3` | Proxied access |
+| `local` | Not needed | `base` | Requires `whisper` binary installed |
+| `none` | — | — | Voice saved as file only |
 
 ## Architecture
 

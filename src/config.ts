@@ -28,6 +28,14 @@ export interface Config {
   security: {
     rateLimitPerMinute: number;
   };
+  stt: {
+    provider: string;
+    apiKey: string;
+    model: string;
+    endpoint: string;
+    localBin: string;
+    language: string;
+  };
   limits: {
     fiveHourMaxRequests: number;
     weeklyMaxRequests: number;
@@ -87,6 +95,14 @@ export function loadConfig(): Config {
     },
     security: {
       rateLimitPerMinute: Number(optional("RATE_LIMIT_PER_MINUTE", "30")),
+    },
+    stt: {
+      provider: optional("STT_PROVIDER", "none"),
+      apiKey: optional("STT_API_KEY", ""),
+      model: optional("STT_MODEL", ""),
+      endpoint: optional("STT_ENDPOINT", ""),
+      localBin: optional("STT_LOCAL_BIN", "whisper"),
+      language: optional("STT_LANGUAGE", ""),
     },
     limits: {
       fiveHourMaxRequests: Number(optional("FIVE_HOUR_MAX_REQUESTS", "50")),

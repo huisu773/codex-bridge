@@ -4,10 +4,11 @@ import { isAuthorizedTelegram, checkRateLimit, sanitizeInput, filterSensitiveOut
 import { logger } from "../../utils/logger.js";
 import { formatTelegramReply } from "./formatter.js";
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
+import { transcribe, type STTConfig } from "../../core/stt-provider.js";
+import { config } from "../../config.js";
 import { nowISO } from "../../utils/helpers.js";
 import { join, basename } from "node:path";
 import { writeFileSync, createReadStream } from "node:fs";
-import { execSync } from "node:child_process";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 
 async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffer> {
@@ -64,16 +65,35 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
   }
 
   // Voice message handling
+  let voiceTranscription = "";
   if (ctx.message?.voice || ctx.message?.audio) {
     const voice = ctx.message.voice || ctx.message.audio!;
     const ext = ctx.message.voice ? "ogg" : (ctx.message.audio?.mime_type?.split("/")[1] || "mp3");
     const fileName = `voice_${Date.now()}.${ext}`;
-    files.push({
+    const voiceFile: PlatformFile = {
       name: fileName,
       mimeType: voice.mime_type || "audio/ogg",
       size: voice.file_size,
       getBuffer: () => downloadTelegramFile(ctx, voice.file_id),
-    });
+    };
+    files.push(voiceFile);
+
+    // Transcribe if STT is configured
+    if (config.stt.provider !== "none") {
+      await ctx.replyWithChatAction("typing").catch(() => {});
+      const session = getOrCreateSession("telegram", String(chatId), String(userId));
+      const buf = await voiceFile.getBuffer();
+      const savedPath = saveReceivedFile(session, fileName, buf, "telegram");
+      // Use the copy in working dir for transcription
+      const workPath = join(session.workingDir, fileName);
+      const sttResult = await transcribe(workPath, config.stt as STTConfig);
+      if (sttResult.success && sttResult.text) {
+        voiceTranscription = sttResult.text;
+        await ctx.reply(`🎤 Voice transcribed:\n${sttResult.text}`);
+      } else {
+        await ctx.reply(`🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+      }
+    }
   }
 
   // Video note (round video) handling
@@ -88,7 +108,9 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
   }
 
   // Save uploaded files to session's received/ folder and working directory
-  if (files.length > 0 && !sanitized.startsWith("/")) {
+  // (voice files already saved above if STT was used)
+  const isVoiceHandled = voiceTranscription !== "" || (files.some(f => f.mimeType?.startsWith("audio/")) && config.stt.provider !== "none");
+  if (files.length > 0 && !sanitized.startsWith("/") && !isVoiceHandled) {
     const session = getOrCreateSession("telegram", String(chatId), String(userId));
     for (const f of files) {
       const buf = await f.getBuffer();
@@ -97,18 +119,22 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     // If no text, just acknowledge the file
     if (!sanitized) {
       const names = files.map((f) => f.name).join(", ");
-      const isVoice = files.some((f) => f.mimeType?.startsWith("audio/"));
-      const emoji = isVoice ? "🎤" : "📎";
+      const hasAudio = files.some((f) => f.mimeType?.startsWith("audio/"));
+      const emoji = hasAudio ? "🎤" : "📎";
       await ctx.reply(`${emoji} Received: ${names}\nFiles saved. You can now ask Codex about them.`);
       return;
     }
   }
 
+  // Use transcription as text if no other text was provided
+  const finalText = sanitized || voiceTranscription;
+  if (!finalText && files.length === 0) return;
+
   const msg: PlatformMessage = {
     platform: "telegram",
     userId: String(userId),
     chatId: String(chatId),
-    text: sanitized,
+    text: finalText,
     files,
   };
 

@@ -4,6 +4,8 @@ import { isAuthorizedFeishu, checkRateLimit, sanitizeInput, filterSensitiveOutpu
 import { logger } from "../../utils/logger.js";
 import { formatFeishuReply, buildFeishuTextContent } from "./formatter.js";
 import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager.js";
+import { transcribe, type STTConfig } from "../../core/stt-provider.js";
+import { config } from "../../config.js";
 import { nowISO } from "../../utils/helpers.js";
 import { join } from "node:path";
 import { writeFileSync, createReadStream, readFileSync, statSync, existsSync } from "node:fs";
@@ -154,8 +156,26 @@ export async function handleFeishuEvent(event: any): Promise<void> {
   const sanitized = sanitizeInput(text);
   if (!sanitized && files.length === 0) return;
 
-  // Save files if not an upload command
-  if (files.length > 0 && !sanitized.startsWith("/upload")) {
+  // Transcribe audio if STT is configured
+  let voiceTranscription = "";
+  const isAudioMsg = msgType === "audio";
+  if (isAudioMsg && config.stt.provider !== "none" && files.length > 0) {
+    const session = getOrCreateSession("feishu", chatId, senderId);
+    const f = files[0];
+    const buf = await f.getBuffer();
+    saveReceivedFile(session, f.name, buf, "feishu");
+    const workPath = join(session.workingDir, f.name);
+    const sttResult = await transcribe(workPath, config.stt as STTConfig);
+    if (sttResult.success && sttResult.text) {
+      voiceTranscription = sttResult.text;
+      await replyFeishuText(messageId, `🎤 Voice transcribed:\n${sttResult.text}`);
+    } else {
+      await replyFeishuText(messageId, `🎤 Voice saved. Transcription failed: ${sttResult.error || "unknown"}`);
+    }
+  }
+
+  // Save files if not already saved by voice handling
+  if (files.length > 0 && !sanitized.startsWith("/") && !isAudioMsg) {
     const session = getOrCreateSession("feishu", chatId, senderId);
     for (const f of files) {
       const buf = await f.getBuffer();
@@ -169,11 +189,15 @@ export async function handleFeishuEvent(event: any): Promise<void> {
     }
   }
 
+  // Use transcription as text if no other text was provided
+  const finalText = sanitized || voiceTranscription;
+  if (!finalText && files.length === 0) return;
+
   const msg: PlatformMessage = {
     platform: "feishu",
     userId: senderId,
     chatId,
-    text: sanitized,
+    text: finalText,
     files,
   };
 

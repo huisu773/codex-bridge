@@ -139,7 +139,7 @@ prompt_value "Working directory" "CODEX_WORKING_DIR" "/root/codex-workspace"
 
 header "Server & Storage"
 prompt_value "Health check port" "WEBHOOK_PORT" "9800"
-prompt_value "Health check host" "WEBHOOK_HOST" "0.0.0.0"
+prompt_value "Health check host" "WEBHOOK_HOST" "127.0.0.1"
 prompt_value "Session directory" "SESSION_DIR" "/root/codex-workspace/sessions"
 prompt_value "Session max age (hours)" "SESSION_MAX_AGE_HOURS" "168"
 
@@ -147,6 +147,24 @@ header "Security & Logging"
 prompt_value "Rate limit (requests/min)" "RATE_LIMIT_PER_MINUTE" "30"
 prompt_value "Log level (debug/info/warn/error)" "LOG_LEVEL" "info"
 prompt_value "Log file path" "LOG_FILE" "./logs/codex-bridge.log"
+
+header "Speech-to-Text (Voice Messages)"
+info "Supported providers: groq, openai, openrouter, local, none"
+info "  groq      — Fast & free tier (recommended)"
+info "  openai    — OpenAI official Whisper API"
+info "  openrouter — OpenRouter proxied Whisper"
+info "  local     — Local whisper binary (whisper.cpp / openai-whisper)"
+info "  none      — Disabled (voice files saved but not transcribed)"
+echo ""
+prompt_value "STT provider" "STT_PROVIDER" "none"
+if [[ "${ENV_VALUES[STT_PROVIDER]}" != "none" && "${ENV_VALUES[STT_PROVIDER]}" != "local" ]]; then
+  prompt_value "STT API key" "STT_API_KEY" "" "required"
+fi
+prompt_value "STT model (leave empty for default)" "STT_MODEL" ""
+prompt_value "STT language hint (e.g. zh, en; empty=auto)" "STT_LANGUAGE" ""
+if [[ "${ENV_VALUES[STT_PROVIDER]}" == "local" ]]; then
+  prompt_value "Local whisper binary path" "STT_LOCAL_BIN" "whisper"
+fi
 
 # ─── Write .env ──────────────────────────────────────────────
 header "Writing Configuration"
@@ -181,6 +199,14 @@ SESSION_MAX_AGE_HOURS=${ENV_VALUES[SESSION_MAX_AGE_HOURS]}
 
 # ---- Security ----
 RATE_LIMIT_PER_MINUTE=${ENV_VALUES[RATE_LIMIT_PER_MINUTE]}
+
+# ---- Speech-to-Text ----
+STT_PROVIDER=${ENV_VALUES[STT_PROVIDER]:-none}
+STT_API_KEY=${ENV_VALUES[STT_API_KEY]:-}
+STT_MODEL=${ENV_VALUES[STT_MODEL]:-}
+STT_ENDPOINT=${ENV_VALUES[STT_ENDPOINT]:-}
+STT_LOCAL_BIN=${ENV_VALUES[STT_LOCAL_BIN]:-whisper}
+STT_LANGUAGE=${ENV_VALUES[STT_LANGUAGE]:-}
 
 # ---- Logging ----
 LOG_LEVEL=${ENV_VALUES[LOG_LEVEL]}

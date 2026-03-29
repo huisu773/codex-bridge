@@ -68,6 +68,10 @@ npm start
 | `SESSION_DIR` | | 会话存储路径 |
 | `WEBHOOK_PORT` | | 健康检查端口（默认：`9800`） |
 | `RATE_LIMIT_PER_MINUTE` | | 每分钟最大请求数（默认：`30`） |
+| `STT_PROVIDER` | | 语音转文字：`groq` / `openai` / `openrouter` / `local` / `none` |
+| `STT_API_KEY` | | STT 提供商的 API Key |
+| `STT_MODEL` | | STT 模型（默认值因提供商而异） |
+| `STT_LANGUAGE` | | 语音识别语言提示（如 `zh`、`en`） |
 | `LOG_LEVEL` | | `debug` / `info` / `warn` / `error` |
 
 ### 飞书配置
@@ -121,7 +125,17 @@ npm start
 ### 图片与语音
 
 - **发送图片**：Codex 通过 `-i` 参数接收图片进行分析
-- **发送语音**：语音文件保存到工作目录，可以让 Codex 处理
+- **发送语音**：自动转录为文字（需配置 STT）并发送给 Codex
+
+#### STT 语音识别提供商
+
+| 提供商 | API Key | 默认模型 | 说明 |
+|--------|---------|----------|------|
+| `groq` | Groq API Key | `whisper-large-v3-turbo` | 速度快，有免费额度（推荐） |
+| `openai` | OpenAI API Key | `whisper-1` | OpenAI 官方 |
+| `openrouter` | OpenRouter Key | `openai/whisper-large-v3` | 代理访问 |
+| `local` | 不需要 | `base` | 需安装本地 `whisper` 程序 |
+| `none` | — | — | 仅保存语音文件，不转录 |
 
 ## 架构
 
