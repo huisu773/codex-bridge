@@ -64,6 +64,14 @@ export async function startFeishuBot(): Promise<void> {
       );
       resolve();
     });
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        logger.warn({ port: config.webhook.port }, "Health check port in use — skipping (non-fatal)");
+      } else {
+        logger.error({ err }, "Health check server error");
+      }
+      resolve(); // Don't crash the whole service
+    });
   });
 }
 
