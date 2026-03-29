@@ -1,13 +1,32 @@
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 
+// Startup security check: warn about empty whitelists
+const emptyPlatforms: string[] = [];
+if (config.telegram.allowedUserIds.length === 0) emptyPlatforms.push("Telegram");
+if (config.feishu.allowedUserIds.length === 0) emptyPlatforms.push("Feishu");
+if (emptyPlatforms.length > 0) {
+  if (process.env.ALLOW_EMPTY_WHITELIST === "yes") {
+    logger.warn({ platforms: emptyPlatforms }, "⚠️ Empty whitelist — ALL users allowed (ALLOW_EMPTY_WHITELIST=yes)");
+  } else {
+    logger.error(
+      { platforms: emptyPlatforms },
+      "🔒 Empty whitelist detected. Users on these platforms will be DENIED. Set ALLOW_EMPTY_WHITELIST=yes or configure allowed user IDs.",
+    );
+  }
+}
+
 export function isAuthorizedTelegram(userId: number): boolean {
-  if (config.telegram.allowedUserIds.length === 0) return true; // No whitelist = allow all (dev mode)
+  if (config.telegram.allowedUserIds.length === 0) {
+    return process.env.ALLOW_EMPTY_WHITELIST === "yes";
+  }
   return config.telegram.allowedUserIds.includes(userId);
 }
 
 export function isAuthorizedFeishu(userId: string): boolean {
-  if (config.feishu.allowedUserIds.length === 0) return true;
+  if (config.feishu.allowedUserIds.length === 0) {
+    return process.env.ALLOW_EMPTY_WHITELIST === "yes";
+  }
   return config.feishu.allowedUserIds.includes(userId);
 }
 

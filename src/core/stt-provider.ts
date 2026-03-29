@@ -9,8 +9,8 @@
  *   - none:    Disabled — voice files saved but not transcribed
  */
 
-import { execSync, execFileSync } from "node:child_process";
-import { createReadStream, existsSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createReadStream, existsSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -48,6 +48,11 @@ const DEFAULT_MODELS: Record<string, string> = {
   local: "base",
 };
 
+/** Validate language code to prevent injection (BCP-47 format) */
+function isValidLanguage(lang: string): boolean {
+  return /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{1,8})?$/.test(lang);
+}
+
 /**
  * Convert audio to WAV format using ffmpeg (required for some APIs).
  * Returns path to the converted file.
@@ -55,13 +60,13 @@ const DEFAULT_MODELS: Record<string, string> = {
 function convertToWav(inputPath: string): string {
   const outPath = join(tmpdir(), `stt-${randomUUID().slice(0, 8)}.wav`);
   try {
-    execSync(
-      `ffmpeg -y -i "${inputPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${outPath}" 2>/dev/null`,
-      { timeout: 30_000 },
-    );
+    execFileSync("ffmpeg", [
+      "-y", "-i", inputPath,
+      "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+      outPath,
+    ], { timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] });
     return outPath;
   } catch {
-    // If conversion fails, return original file
     logger.warn({ inputPath }, "ffmpeg conversion failed, using original file");
     return inputPath;
   }
@@ -136,11 +141,9 @@ async function transcribeViaAPI(
       error: err.message,
     };
   } finally {
-    // Clean up temp WAV file
+    // Clean up temp WAV file synchronously to prevent leaks
     if (wavPath !== filePath) {
-      try {
-        import("node:fs").then((fs) => fs.unlinkSync(wavPath));
-      } catch {}
+      try { unlinkSync(wavPath); } catch {}
     }
   }
 }
@@ -157,7 +160,7 @@ async function transcribeLocal(
 
   // Check if binary exists
   try {
-    execSync(`which ${bin}`, { stdio: "ignore" });
+    execFileSync("which", [bin], { stdio: "ignore" });
   } catch {
     return {
       success: false,
@@ -171,19 +174,21 @@ async function transcribeLocal(
   const outDir = tmpdir();
 
   try {
-    // openai-whisper CLI: whisper audio.wav --model base --output_format txt --output_dir /tmp
-    execSync(
-      `${bin} "${wavPath}" --model ${model} --output_format txt --output_dir "${outDir}" ${config.language ? `--language ${config.language}` : ""} 2>/dev/null`,
-      { timeout: 120_000 },
-    );
+    const args = [wavPath, "--model", model, "--output_format", "txt", "--output_dir", outDir];
+    if (config.language) {
+      if (!isValidLanguage(config.language)) {
+        return { success: false, text: "", provider: "local", error: `Invalid language code: ${config.language}` };
+      }
+      args.push("--language", config.language);
+    }
+    execFileSync(bin, args, { timeout: 120_000, stdio: ["pipe", "pipe", "pipe"] });
 
     // Read the output .txt file
     const baseName = wavPath.split("/").pop()?.replace(/\.[^.]+$/, "") || "audio";
     const txtPath = join(outDir, `${baseName}.txt`);
     if (existsSync(txtPath)) {
-      const text = await import("node:fs").then((fs) =>
-        fs.readFileSync(txtPath, "utf-8").trim(),
-      );
+      const { readFileSync } = await import("node:fs");
+      const text = readFileSync(txtPath, "utf-8").trim();
       return { success: true, text, provider: "local" };
     }
 
@@ -201,10 +206,9 @@ async function transcribeLocal(
       error: err.message?.slice(0, 200),
     };
   } finally {
+    // Clean up temp WAV file synchronously to prevent leaks
     if (wavPath !== filePath) {
-      try {
-        import("node:fs").then((fs) => fs.unlinkSync(wavPath));
-      } catch {}
+      try { unlinkSync(wavPath); } catch {}
     }
   }
 }

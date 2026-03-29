@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, execSync } from "node:child_process";
+import { spawn, type ChildProcess, execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync, readFileSync, unlinkSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -52,16 +52,18 @@ export function getRealUsageStats(): RealUsageStats {
 
   try {
     if (existsSync(CODEX_STATE_DB)) {
-      const fiveHrResult = execSync(
-        `sqlite3 "${CODEX_STATE_DB}" "SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${fiveHrAgo};"`,
+      const fiveHrResult = execFileSync(
+        "sqlite3",
+        [CODEX_STATE_DB, `SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${fiveHrAgo};`],
         { encoding: "utf-8", timeout: 5000 },
       ).trim();
       const fiveHrParts = fiveHrResult.split("|");
       fiveHour = { requests: Number(fiveHrParts[0]) || 0, tokens: Number(fiveHrParts[1]) || 0 };
       earliestFiveHr = Number(fiveHrParts[2]) || 0;
 
-      const weeklyResult = execSync(
-        `sqlite3 "${CODEX_STATE_DB}" "SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${weekAgo};"`,
+      const weeklyResult = execFileSync(
+        "sqlite3",
+        [CODEX_STATE_DB, `SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${weekAgo};`],
         { encoding: "utf-8", timeout: 5000 },
       ).trim();
       const weeklyParts = weeklyResult.split("|");
@@ -88,11 +90,24 @@ const runningProcesses = new Map<string, ChildProcess>();
 function snapshotDir(dir: string): Map<string, number> {
   const snap = new Map<string, number>();
   try {
-    const output = execSync(
-      `find "${dir}" -maxdepth 3 -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/logs/*' -not -name '*.log' -not -name '*.sqlite*' -not -name '*.lock' -not -name 'package-lock.json' -not -path '*/dist/*' -not -path '*/.codex/*' -not -path '*/sessions/*' -printf '%T@ %p\n' 2>/dev/null | head -5000`,
-      { encoding: "utf-8", timeout: 5000 },
-    );
-    for (const line of output.trim().split("\n").filter(Boolean)) {
+    const output = execFileSync("find", [
+      dir,
+      "-maxdepth", "3",
+      "-type", "f",
+      "-not", "-path", "*/node_modules/*",
+      "-not", "-path", "*/.git/*",
+      "-not", "-path", "*/logs/*",
+      "-not", "-name", "*.log",
+      "-not", "-name", "*.sqlite*",
+      "-not", "-name", "*.lock",
+      "-not", "-name", "package-lock.json",
+      "-not", "-path", "*/dist/*",
+      "-not", "-path", "*/.codex/*",
+      "-not", "-path", "*/sessions/*",
+      "-printf", "%T@ %p\\n",
+    ], { encoding: "utf-8", timeout: 5000, maxBuffer: 5 * 1024 * 1024 });
+    const lines = output.trim().split("\n").filter(Boolean).slice(0, 5000);
+    for (const line of lines) {
       const spaceIdx = line.indexOf(" ");
       if (spaceIdx > 0) {
         const mtime = parseFloat(line.slice(0, spaceIdx));

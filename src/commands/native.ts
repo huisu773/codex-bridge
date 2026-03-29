@@ -30,8 +30,6 @@ const chatQueues = new Map<string, Promise<void>>();
 function enqueueChatTask(chatKey: string, task: () => Promise<void>): Promise<void> {
   const previous = chatQueues.get(chatKey) || Promise.resolve();
   const current = previous.then(task).catch((err) => {
-    // Don't let errors break the queue chain
-    const { logger } = require("../utils/logger.js");
     logger.error({ err, chatKey }, "Chat task queue error");
   });
   chatQueues.set(chatKey, current);
