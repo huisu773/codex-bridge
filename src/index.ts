@@ -16,6 +16,14 @@ async function main() {
     webhookPort: config.webhook.port,
   }, "Configuration loaded");
 
+  // Security warnings
+  if (config.telegram.allowedUserIds.length === 0) {
+    logger.warn("⚠️  ALLOWED_TELEGRAM_IDS is empty — ALL Telegram users can access the bot!");
+  }
+  if (config.feishu.allowedUserIds.length === 0) {
+    logger.warn("⚠️  ALLOWED_FEISHU_IDS is empty — ALL Feishu users can access the bot!");
+  }
+
   // Load existing sessions
   loadSessionsFromDisk();
 

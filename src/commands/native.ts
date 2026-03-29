@@ -279,9 +279,23 @@ export function registerNativeCommands(): void {
       // Inject context about recently received files
       const pendingFiles = consumePendingFiles(session);
       let prompt = msg.text;
-      if (pendingFiles.length > 0) {
-        const fileList = pendingFiles.map((p) => `  - ${p}`).join("\n");
+      const imageFiles: string[] = [];
+      const otherFiles: string[] = [];
+
+      for (const f of pendingFiles) {
+        if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(f)) {
+          imageFiles.push(f);
+        } else {
+          otherFiles.push(f);
+        }
+      }
+
+      if (otherFiles.length > 0) {
+        const fileList = otherFiles.map((p) => `  - ${p}`).join("\n");
         prompt = `[Context: The user recently uploaded the following file(s) to the working directory:\n${fileList}\nPlease take these files into account when responding.]\n\n${prompt}`;
+      }
+      if (imageFiles.length > 0 && !prompt) {
+        prompt = "Please describe or analyze the image(s) I just sent.";
       }
 
       appendConversation(session, {
@@ -295,6 +309,7 @@ export function registerNativeCommands(): void {
         prompt,
         model: session.model,
         workingDir: session.workingDir,
+        images: imageFiles.length > 0 ? imageFiles : undefined,
       });
 
       // Update token usage

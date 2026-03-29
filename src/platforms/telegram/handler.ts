@@ -7,7 +7,16 @@ import { getOrCreateSession, saveReceivedFile } from "../../core/session-manager
 import { nowISO } from "../../utils/helpers.js";
 import { join, basename } from "node:path";
 import { writeFileSync, createReadStream } from "node:fs";
+import { execSync } from "node:child_process";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
+
+async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffer> {
+  const file = await ctx.api.getFile(fileId);
+  const resp = await fetch(
+    `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`,
+  );
+  return Buffer.from(await resp.arrayBuffer());
+}
 
 export async function handleTelegramMessage(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
@@ -30,7 +39,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
   }
 
   const sanitized = sanitizeInput(text);
-  if (!sanitized && !ctx.message?.document && !ctx.message?.photo) return;
+  if (!sanitized && !ctx.message?.document && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.audio && !ctx.message?.video_note) return;
 
   // Handle file uploads
   const files: PlatformFile[] = [];
@@ -40,34 +49,46 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
       name: doc.file_name || "unnamed_file",
       mimeType: doc.mime_type,
       size: doc.file_size,
-      getBuffer: async () => {
-        const file = await ctx.api.getFile(doc.file_id);
-        const resp = await fetch(
-          `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`,
-        );
-        return Buffer.from(await resp.arrayBuffer());
-      },
+      getBuffer: () => downloadTelegramFile(ctx, doc.file_id),
     });
   }
 
   if (ctx.message?.photo) {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Largest
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
     files.push({
-      name: "photo.jpg",
+      name: `photo_${Date.now()}.jpg`,
       mimeType: "image/jpeg",
       size: photo.file_size,
-      getBuffer: async () => {
-        const file = await ctx.api.getFile(photo.file_id);
-        const resp = await fetch(
-          `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`,
-        );
-        return Buffer.from(await resp.arrayBuffer());
-      },
+      getBuffer: () => downloadTelegramFile(ctx, photo.file_id),
+    });
+  }
+
+  // Voice message handling
+  if (ctx.message?.voice || ctx.message?.audio) {
+    const voice = ctx.message.voice || ctx.message.audio!;
+    const ext = ctx.message.voice ? "ogg" : (ctx.message.audio?.mime_type?.split("/")[1] || "mp3");
+    const fileName = `voice_${Date.now()}.${ext}`;
+    files.push({
+      name: fileName,
+      mimeType: voice.mime_type || "audio/ogg",
+      size: voice.file_size,
+      getBuffer: () => downloadTelegramFile(ctx, voice.file_id),
+    });
+  }
+
+  // Video note (round video) handling
+  if (ctx.message?.video_note) {
+    const vn = ctx.message.video_note;
+    files.push({
+      name: `videonote_${Date.now()}.mp4`,
+      mimeType: "video/mp4",
+      size: vn.file_size,
+      getBuffer: () => downloadTelegramFile(ctx, vn.file_id),
     });
   }
 
   // Save uploaded files to session's received/ folder and working directory
-  if (files.length > 0 && !sanitized.startsWith("/upload")) {
+  if (files.length > 0 && !sanitized.startsWith("/")) {
     const session = getOrCreateSession("telegram", String(chatId), String(userId));
     for (const f of files) {
       const buf = await f.getBuffer();
@@ -76,7 +97,9 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     // If no text, just acknowledge the file
     if (!sanitized) {
       const names = files.map((f) => f.name).join(", ");
-      await ctx.reply(`📎 Received: ${names}\nFiles saved. You can now ask Codex about them.`);
+      const isVoice = files.some((f) => f.mimeType?.startsWith("audio/"));
+      const emoji = isVoice ? "🎤" : "📎";
+      await ctx.reply(`${emoji} Received: ${names}\nFiles saved. You can now ask Codex about them.`);
       return;
     }
   }

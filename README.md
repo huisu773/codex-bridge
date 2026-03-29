@@ -2,7 +2,7 @@
 
 飞书 (Feishu) & Telegram ↔ Codex CLI bridge service. Use Codex remotely through your chat apps.
 
-[English](#features) | [中文](#功能)
+[English](#features) | [中文](README.zh-CN.md)
 
 ## Features
 
@@ -11,6 +11,8 @@
 - 🔐 **Secure**: User ID whitelist + rate limiting + sensitive output filtering
 - 📂 **Session Management**: Per-session directories with full conversation + file tracking
 - 📎 **File I/O**: Upload/download files through chat; auto-sends files created by Codex
+- 🖼️ **Image Input**: Send images for Codex to analyze (via `-i` flag)
+- 🎤 **Voice Messages**: Receive and save voice messages from both platforms
 - 🧠 **File Context Awareness**: Upload a file → Codex automatically knows about it in your next message
 - 🔧 **Extensible Commands**: Built-in + custom commands, easy to add more
 - 🚀 **systemd Service**: Auto-start on boot, managed as a system daemon
@@ -20,7 +22,7 @@
 ### Option A: Interactive Setup (Recommended)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/codex-bridge.git
+git clone https://github.com/huisu773/codex-bridge.git
 cd codex-bridge
 ./setup.sh
 ```
@@ -116,6 +118,11 @@ Send any message without a `/` prefix to chat with Codex directly. Codex execute
 2. **Ask Codex** about the file in your next message → Codex automatically receives the file path context
 3. **Files created by Codex** are auto-sent back to you in chat
 
+### Image & Voice
+
+- **Send an image**: Codex receives it via the `-i` flag for visual analysis
+- **Send a voice message**: Audio file is saved to the working directory for Codex to process
+
 ## Architecture
 
 ```
@@ -170,6 +177,7 @@ npm run dev      # Watch mode (if configured)
 - **Rate limiting**: Configurable per-minute request limit
 - **Input sanitization**: Command injection prevention
 - **Output filtering**: Sensitive patterns (tokens, keys) are masked in responses
+- **Health check port**: Binds to `127.0.0.1` by default — not exposed externally
 - **Full access mode**: Codex runs without sandbox (`--dangerously-bypass-approvals-and-sandbox`) — ensure your server is properly secured
 
 ## License

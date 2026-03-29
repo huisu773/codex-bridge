@@ -103,7 +103,7 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       const content = JSON.parse(event.message.content);
       const imageKey = content.image_key;
       files.push({
-        name: "image.png",
+        name: `image_${Date.now()}.png`,
         mimeType: "image/png",
         getBuffer: async () => {
           const resp = await client!.im.messageResource.get({
@@ -119,6 +119,30 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       });
     } catch (err) {
       logger.error({ err }, "Failed to parse Feishu image message");
+      return;
+    }
+  } else if (msgType === "audio") {
+    try {
+      const content = JSON.parse(event.message.content);
+      const fileKey = content.file_key;
+      const duration = content.duration || 0;
+      files.push({
+        name: `voice_${Date.now()}.opus`,
+        mimeType: "audio/opus",
+        getBuffer: async () => {
+          const resp = await client!.im.messageResource.get({
+            path: { message_id: messageId, file_key: fileKey },
+            params: { type: "file" },
+          });
+          const chunks: Buffer[] = [];
+          for await (const chunk of resp as any) {
+            chunks.push(Buffer.from(chunk));
+          }
+          return Buffer.concat(chunks);
+        },
+      });
+    } catch (err) {
+      logger.error({ err }, "Failed to parse Feishu audio message");
       return;
     }
   } else {

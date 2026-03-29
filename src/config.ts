@@ -74,7 +74,7 @@ export function loadConfig(): Config {
     },
     webhook: {
       port: Number(optional("WEBHOOK_PORT", "9800")),
-      host: optional("WEBHOOK_HOST", "0.0.0.0"),
+      host: optional("WEBHOOK_HOST", "127.0.0.1"),
     },
     codex: {
       model: optional("CODEX_MODEL", "gpt-5.3-codex"),
