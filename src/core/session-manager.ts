@@ -7,6 +7,8 @@ import {
   readdirSync,
   rmSync,
   copyFileSync,
+  renameSync,
+  unlinkSync,
   statSync,
 } from "node:fs";
 import { join, basename, resolve } from "node:path";
@@ -57,6 +59,7 @@ export function createSession(
     userId,
     model: config.codex.model,
     workingDir: config.codex.workingDir,
+    isCustomWorkingDir: false,
     sessionDir: dir,
     createdAt: nowISO(),
     updatedAt: nowISO(),
@@ -207,12 +210,14 @@ export function recordFile(
 }
 
 /**
- * Copy a generated file into the session's generated/ folder and record it.
+ * Copy (or move) a generated file into the session's generated/ folder and record it.
+ * When moveFile=true, the original is removed after copying to session.
  */
 export function saveGeneratedFile(
   session: Session,
   originalPath: string,
   platform: "telegram" | "feishu",
+  moveFile = false,
 ): FileRecord | null {
   try {
     if (!existsSync(originalPath)) return null;
@@ -223,6 +228,16 @@ export function saveGeneratedFile(
     ensureDir(destDir);
     const dest = join(destDir, fileName);
     copyFileSync(originalPath, dest);
+
+    // Remove original if move mode (default workspace cleanup)
+    if (moveFile) {
+      try {
+        unlinkSync(originalPath);
+      } catch {
+        // Ignore removal errors (e.g., permission issues)
+      }
+    }
+
     const record: FileRecord = {
       timestamp: nowISO(),
       type: "generated",
@@ -343,6 +358,7 @@ export function listAllSessions(): Session[] {
         // Backfill missing fields
         if (!session.sessionDir) session.sessionDir = sessionDir(session.id);
         if (!session.stats) session.stats = { totalGeneratedFiles: 0, totalReceivedFiles: 0, totalTokensUsed: 0 };
+        if (session.isCustomWorkingDir === undefined) session.isCustomWorkingDir = false;
         sessions.push(session);
       } catch {
         // Skip corrupted sessions

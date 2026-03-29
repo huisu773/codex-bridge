@@ -5,6 +5,7 @@ export interface Session {
   userId: string;
   model: string;
   workingDir: string;
+  isCustomWorkingDir: boolean; // true when user explicitly set via /cd
   sessionDir: string;
   codexSessionId?: string;
   createdAt: string;

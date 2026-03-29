@@ -22,6 +22,7 @@ export interface CodexExecResult {
   output: string;
   exitCode: number;
   durationMs: number;
+  timedOut: boolean;
   usage?: { inputTokens: number; outputTokens: number; cachedTokens: number };
   newFiles: string[];
   threadId?: string; // codex session ID for resume
@@ -121,7 +122,9 @@ export async function executeCodex(
 ): Promise<CodexExecResult> {
   const model = opts.model || config.codex.model;
   const workDir = opts.workingDir || config.codex.workingDir;
-  const timeout = opts.timeoutMs || 300_000; // 5 min default
+  const baseTimeout = opts.timeoutMs || config.codex.timeoutMs;
+  const maxTimeout = config.codex.maxTimeoutMs;
+  const EXTEND_INTERVAL = 120_000; // Extend by 2 min each time
 
   const beforeSnap = snapshotDir(workDir);
   const outputFile = join(tmpdir(), `codex-out-${randomUUID().slice(0, 8)}.txt`);
@@ -184,10 +187,14 @@ export async function executeCodex(
     let threadId: string | undefined;
     let accumulatedText = "";
     let lineBuffer = "";
+    let lastActivityTime = Date.now();
+    let timedOut = false;
+    let processClosed = false;
 
     proc.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
+      lastActivityTime = Date.now();
       opts.onProgress?.(text);
 
       // Parse JSONL events for streaming
@@ -216,17 +223,47 @@ export async function executeCodex(
 
     proc.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
+      lastActivityTime = Date.now();
     });
 
-    const timer = setTimeout(() => {
+    // Adaptive timeout: extend if Codex is still producing output
+    let currentDeadline = start + baseTimeout;
+    const ACTIVITY_WINDOW = 60_000; // Consider "active" if output within last 60s
+
+    const adaptiveTimer = setInterval(() => {
+      if (processClosed) { clearInterval(adaptiveTimer); return; }
+      const now = Date.now();
+      if (now < currentDeadline) return; // Not yet at deadline
+
+      const elapsed = now - start;
+      const recentlyActive = (now - lastActivityTime) < ACTIVITY_WINDOW;
+
+      if (recentlyActive && elapsed < maxTimeout) {
+        // Still active and under max timeout — extend
+        currentDeadline = now + EXTEND_INTERVAL;
+        logger.info(
+          { elapsed: Math.round(elapsed / 1000), nextDeadline: Math.round((currentDeadline - start) / 1000) },
+          "Codex still active, extending timeout",
+        );
+        return;
+      }
+
+      // Deadline reached and no recent activity (or max timeout hit)
+      clearInterval(adaptiveTimer);
+      timedOut = true;
+      logger.warn(
+        { elapsed: Math.round(elapsed / 1000), maxTimeout: Math.round(maxTimeout / 1000), recentlyActive },
+        "Codex execution timed out",
+      );
       proc.kill("SIGTERM");
       setTimeout(() => {
         if (!proc.killed) proc.kill("SIGKILL");
       }, 5000);
-    }, timeout);
+    }, 5000); // Check every 5 seconds
 
     proc.on("close", (code) => {
-      clearTimeout(timer);
+      processClosed = true;
+      clearInterval(adaptiveTimer);
       runningProcesses.delete(execId);
       const durationMs = Date.now() - start;
 
@@ -282,7 +319,7 @@ export async function executeCodex(
       const output = finalOutput || accumulatedText.trim() || stdout || stderr;
 
       logger.info(
-        { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length, threadId },
+        { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length, threadId, timedOut },
         "Codex execution completed",
       );
 
@@ -291,6 +328,7 @@ export async function executeCodex(
         output: output.trim(),
         exitCode: code ?? 1,
         durationMs,
+        timedOut,
         usage,
         newFiles,
         threadId,
@@ -298,7 +336,7 @@ export async function executeCodex(
     });
 
     proc.on("error", (err) => {
-      clearTimeout(timer);
+      clearInterval(adaptiveTimer);
       runningProcesses.delete(execId);
       logger.error({ err }, "Codex spawn error");
       resolve({
@@ -306,6 +344,7 @@ export async function executeCodex(
         output: `Error spawning codex: ${err.message}`,
         exitCode: 1,
         durationMs: Date.now() - start,
+        timedOut: false,
         newFiles: [],
       });
     });

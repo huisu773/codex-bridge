@@ -11,6 +11,7 @@ import {
   appendConversation,
   saveGeneratedFile,
   consumePendingFiles,
+  recordFileSent,
 } from "../core/session-manager.js";
 import {
   executeCodex,
@@ -20,6 +21,7 @@ import {
 import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
+import { logger } from "../utils/logger.js";
 import type { PlatformMessage } from "../platforms/types.js";
 
 // Per-chat task queue for parallel execution across chats
@@ -418,23 +420,54 @@ export function registerNativeCommands(): void {
             await sendReply(statusMsg);
           }
 
-          // Save generated files to session folder (no auto-send to user)
+          // Timeout recovery: inform user and suggest continuation
+          if (result.timedOut) {
+            const durationMin = Math.round(result.durationMs / 60_000);
+            const hasThread = !!result.threadId;
+            const resumeHint = hasThread
+              ? "\n💡 You can send a follow-up message to continue where it left off."
+              : "";
+            await sendReply(
+              `⏰ Task timed out after ${durationMin} minute(s).${resumeHint}`,
+            );
+          }
+
+          // Save generated files to session and send to user
           if (result.newFiles.length > 0) {
             let savedCount = 0;
-            const MAX_FILE_SIZE = 50 * 1024 * 1024;
+            let sentCount = 0;
+            const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB max save
+            const MAX_SEND_SIZE = 20 * 1024 * 1024; // 20MB max send
+            // Move files out of default workspace; copy if user set a custom working dir
+            const shouldMove = !session.isCustomWorkingDir;
             for (const filePath of result.newFiles) {
               try {
                 if (!existsSync(filePath)) continue;
                 const stat = statSync(filePath);
                 if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
-                saveGeneratedFile(session, filePath, msg.platform);
+                const record = saveGeneratedFile(session, filePath, msg.platform, shouldMove);
+                if (!record) continue;
                 savedCount++;
+
+                // Send file to user via platform
+                if (stat.size <= MAX_SEND_SIZE) {
+                  try {
+                    await sendFile(record.sessionPath, record.fileName);
+                    recordFileSent(session, record.sessionPath, msg.platform);
+                    sentCount++;
+                  } catch (sendErr) {
+                    logger.warn({ err: sendErr, file: record.fileName }, "Failed to send file to user");
+                  }
+                }
               } catch {
                 // Ignore individual file save errors
               }
             }
             if (savedCount > 0) {
-              await sendReply(`📁 ${savedCount} file(s) created/modified and saved to session.`);
+              const sentNote = sentCount > 0 ? ` (${sentCount} sent)` : "";
+              const unsent = savedCount - sentCount;
+              const unsentNote = unsent > 0 ? `\n📂 ${unsent} file(s) too large to send, saved in session.` : "";
+              await sendReply(`📁 ${savedCount} file(s) saved${sentNote}.${unsentNote}`);
             }
           }
         } catch (err) {

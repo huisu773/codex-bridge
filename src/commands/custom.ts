@@ -54,6 +54,7 @@ export function registerCustomCommands(): void {
         await sendReply(`❌ Not a directory: ${newDir}`);
         return;
       }
+      session.isCustomWorkingDir = true;
       updateSessionWorkingDir(session, newDir);
       await sendReply(`📂 Working directory changed to: ${newDir}`);
     },
