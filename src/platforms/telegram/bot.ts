@@ -3,6 +3,7 @@ import { config } from "../../config.js";
 import { logger } from "../../utils/logger.js";
 import { handleTelegramMessage } from "./handler.js";
 import { getUniqueCommands } from "../../commands/registry.js";
+import { setPlatformStatus } from "../../utils/metrics.js";
 
 let bot: Bot | null = null;
 
@@ -40,6 +41,7 @@ export async function startTelegramBot(): Promise<void> {
   // Use long polling
   await bot.start({
     onStart: () => {
+      setPlatformStatus("telegram", "connected");
       logger.info("Telegram bot started (long polling)");
     },
   });
@@ -48,6 +50,7 @@ export async function startTelegramBot(): Promise<void> {
 export function stopTelegramBot(): void {
   if (bot) {
     bot.stop();
+    setPlatformStatus("telegram", "disconnected");
     logger.info("Telegram bot stopped");
   }
 }

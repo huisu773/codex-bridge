@@ -10,13 +10,26 @@ import { basename } from "node:path";
 import { createReadStream } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 import { InputFile } from "grammy";
+import { withRetry } from "../../utils/retry.js";
+
+const DOWNLOAD_TIMEOUT_MS = 60_000;
 
 async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffer> {
   const file = await ctx.api.getFile(fileId);
-  const resp = await fetch(
-    `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`,
-  );
-  return Buffer.from(await resp.arrayBuffer());
+  return withRetry(async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+    try {
+      const resp = await fetch(
+        `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`,
+        { signal: controller.signal },
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return Buffer.from(await resp.arrayBuffer());
+    } finally {
+      clearTimeout(timeout);
+    }
+  }, { label: "telegram-download" });
 }
 
 export async function handleTelegramMessage(ctx: Context): Promise<void> {
@@ -188,7 +201,8 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
       });
     } catch (err) {
       logger.error({ err, filePath }, "Failed to send file via Telegram");
-      await ctx.reply(`❌ Failed to send file: ${filePath}`);
+      const reason = err instanceof Error && err.message.includes("too large") ? "File exceeds Telegram's size limit." : "Network error or file unreadable.";
+      await ctx.reply(`❌ Failed to send file: ${basename(filePath)}. ${reason}`);
     }
   };
 

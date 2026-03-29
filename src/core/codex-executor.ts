@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
+import { recordCodexExecution } from "../utils/metrics.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -347,6 +348,8 @@ export async function executeCodex(
 
       // Prefer -o file output, then accumulated streaming text, then raw stdout
       const output = finalOutput || accumulatedText.trim() || stdout || stderr;
+
+      recordCodexExecution(code === 0, durationMs, timedOut);
 
       logger.info(
         { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length, threadId, timedOut },

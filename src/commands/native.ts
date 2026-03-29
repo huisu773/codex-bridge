@@ -23,6 +23,52 @@ import { nowISO } from "../utils/helpers.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { logger } from "../utils/logger.js";
 import type { PlatformMessage } from "../platforms/types.js";
+import { getServiceMetrics } from "../utils/metrics.js";
+
+/** Build the prompt by injecting pending file context and separating images. */
+function buildPromptWithFiles(
+  text: string,
+  pendingFiles: string[],
+): { prompt: string; imageFiles: string[] } {
+  let prompt = text;
+  const imageFiles: string[] = [];
+  const otherFiles: string[] = [];
+
+  for (const f of pendingFiles) {
+    if (/\.(ogg|opus|mp3|wav|m4a|flac)$/i.test(f)) continue;
+    if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(f)) {
+      imageFiles.push(f);
+    } else {
+      otherFiles.push(f);
+    }
+  }
+
+  if (otherFiles.length > 0) {
+    const fileList = otherFiles.map((p) => `  - ${p}`).join("\n");
+    prompt = `[Context: The user recently uploaded the following file(s) to the working directory:\n${fileList}\nPlease take these files into account when responding.]\n\n${prompt}`;
+  }
+  if (imageFiles.length > 0 && !prompt) {
+    prompt = "Please describe or analyze the image(s) I just sent.";
+  }
+
+  return { prompt, imageFiles };
+}
+
+/** Classify an error into a user-friendly message with recovery hints. */
+function classifyError(err: unknown): string {
+  if (!(err instanceof Error)) return `❌ Execution error: ${String(err)}`;
+  const m = err.message;
+  if (m.includes("ENOENT") || m.includes("spawn")) {
+    return "❌ Codex CLI not found. Check CODEX_BIN path in configuration.";
+  }
+  if (m.includes("ETIMEDOUT") || m.includes("timeout") || m.includes("AbortError")) {
+    return "⏱️ Request timed out. Try a simpler instruction or use /cancel.";
+  }
+  if (m.includes("ENOMEM") || m.includes("memory")) {
+    return "❌ Out of memory. Try a smaller task or restart the service.";
+  }
+  return `❌ Execution error: ${m}`;
+}
 
 // Per-chat task queue for parallel execution across chats
 const chatQueues = new Map<string, Promise<void>>();
@@ -130,9 +176,17 @@ export function registerNativeCommands(): void {
       const running = getRunningTaskCount();
       const allSessions = listAllSessions();
       const account = getCodexAccountInfo();
+      const metrics = getServiceMetrics(running);
 
       const lines = [
         "📊 **Status**",
+        "",
+        "— Service —",
+        `Uptime: ${metrics.uptime}s | Memory: ${metrics.memory.rss}MB RSS`,
+        `Platforms: telegram=${metrics.platforms.telegram}, feishu=${metrics.platforms.feishu}`,
+        metrics.codex.total > 0
+          ? `Codex: ${metrics.codex.total} runs (${metrics.codex.success} ok, ${metrics.codex.failed} fail), avg ${metrics.codex.avgDurationMs}ms`
+          : "Codex: no runs yet",
         "",
         "— Session —",
         session
@@ -284,29 +338,7 @@ export function registerNativeCommands(): void {
       await enqueueChatTask(chatKey, async () => {
         const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
 
-        // Inject context about recently received files
-        const pendingFiles = consumePendingFiles(session);
-        let prompt = msg.text;
-        const imageFiles: string[] = [];
-        const otherFiles: string[] = [];
-
-        for (const f of pendingFiles) {
-          // Skip audio files (already transcribed)
-          if (/\.(ogg|opus|mp3|wav|m4a|flac)$/i.test(f)) continue;
-          if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(f)) {
-            imageFiles.push(f);
-          } else {
-            otherFiles.push(f);
-          }
-        }
-
-        if (otherFiles.length > 0) {
-          const fileList = otherFiles.map((p) => `  - ${p}`).join("\n");
-          prompt = `[Context: The user recently uploaded the following file(s) to the working directory:\n${fileList}\nPlease take these files into account when responding.]\n\n${prompt}`;
-        }
-        if (imageFiles.length > 0 && !prompt) {
-          prompt = "Please describe or analyze the image(s) I just sent.";
-        }
+        const { prompt, imageFiles } = buildPromptWithFiles(msg.text, consumePendingFiles(session));
 
         appendConversation(session, {
           timestamp: nowISO(),
@@ -467,7 +499,7 @@ export function registerNativeCommands(): void {
             }
           }
         } catch (err) {
-          const errMsg = `❌ Execution error: ${err instanceof Error ? err.message : String(err)}`;
+          const errMsg = classifyError(err);
           // Always try to finalize stream card to remove "Generating..." indicator
           if (streamMsgId) {
             const errFinalize = msg.finalizeStream || msg.updateStream;

@@ -3,6 +3,8 @@ import express from "express";
 import { config } from "../../config.js";
 import { logger } from "../../utils/logger.js";
 import { initFeishuClient, handleFeishuEvent } from "./handler.js";
+import { getServiceMetrics, setPlatformStatus } from "../../utils/metrics.js";
+import { getRunningTaskCount } from "../../core/codex-executor.js";
 
 let wsClient: lark.WSClient | null = null;
 let server: ReturnType<typeof express.application.listen> | null = null;
@@ -25,11 +27,12 @@ export async function startFeishuBot(): Promise<void> {
   // Still start Express for health check
   const app = express();
   app.get("/health", (_req, res) => {
+    const metrics = getServiceMetrics(getRunningTaskCount());
     res.json({
       status: "ok",
       service: "codex-bridge",
       timestamp: new Date().toISOString(),
-      feishu: wsClient ? "connected" : "disconnected",
+      ...metrics,
     });
   });
 
@@ -80,6 +83,7 @@ async function connectFeishuWS(): Promise<void> {
   try {
     await wsClient.start({ eventDispatcher });
     reconnectAttempts = 0;
+    setPlatformStatus("feishu", "connected");
     logger.info("Feishu WebSocket client started (long connection mode)");
   } catch (err) {
     logger.error({ err }, "Feishu WebSocket start failed");
@@ -92,6 +96,7 @@ const MAX_RECONNECT_ATTEMPTS = 50;
 function scheduleReconnect(): void {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    setPlatformStatus("feishu", "disconnected");
     logger.error(
       { attempts: reconnectAttempts },
       "Feishu WS max reconnect attempts reached — giving up. Restart the service to retry.",
@@ -117,6 +122,7 @@ function scheduleReconnect(): void {
 }
 
 export function stopFeishuBot(): void {
+  setPlatformStatus("feishu", "disconnected");
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;

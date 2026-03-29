@@ -8,6 +8,7 @@ import { transcribe, type STTConfig } from "../../core/stt-provider.js";
 import { config } from "../../config.js";
 import { createReadStream, readFileSync, statSync, existsSync } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
+import { withRetry } from "../../utils/retry.js";
 
 let client: lark.Client | null = null;
 
@@ -52,18 +53,19 @@ setInterval(() => {
 async function downloadFeishuResource(messageId: string, fileKey: string, type: string): Promise<Buffer> {
   if (!client) throw new Error("Feishu client not initialized");
 
-  const DOWNLOAD_TIMEOUT = 30_000;
+  return withRetry(async () => {
+    const DOWNLOAD_TIMEOUT = 30_000;
 
-  const downloadPromise = client.im.messageResource.get({
-    path: { message_id: messageId, file_key: fileKey },
-    params: { type },
-  });
+    const downloadPromise = client!.im.messageResource.get({
+      path: { message_id: messageId, file_key: fileKey },
+      params: { type },
+    });
 
-  const timeoutPromise = new Promise<never>((_resolve, reject) =>
-    setTimeout(() => reject(new Error(`Feishu resource download timed out after ${DOWNLOAD_TIMEOUT}ms`)), DOWNLOAD_TIMEOUT),
-  );
+    const timeoutPromise = new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error(`Feishu resource download timed out after ${DOWNLOAD_TIMEOUT}ms`)), DOWNLOAD_TIMEOUT),
+    );
 
-  const resp = await Promise.race([downloadPromise, timeoutPromise]);
+    const resp = await Promise.race([downloadPromise, timeoutPromise]);
 
   // SDK v1.60 returns { writeFile, getReadableStream, headers }
   if (resp && typeof (resp as any).getReadableStream === "function") {
@@ -91,8 +93,9 @@ async function downloadFeishuResource(messageId: string, fileKey: string, type: 
     return Buffer.concat(chunks);
   }
 
-  logger.warn({ type: typeof resp, keys: Object.keys(resp || {}) }, "Unknown Feishu resource response format");
-  throw new Error("Cannot read Feishu resource response");
+    logger.warn({ type: typeof resp, keys: Object.keys(resp || {}) }, "Unknown Feishu resource response format");
+    throw new Error("Cannot read Feishu resource response");
+  }, { label: "feishu-download" });
 }
 
 export async function handleFeishuEvent(event: any): Promise<void> {
@@ -338,10 +341,10 @@ export async function handleFeishuEvent(event: any): Promise<void> {
           const content = readFileSync(filePath, "utf-8");
           await replyFeishu(messageId, `📄 ${filePath}\n\`\`\`\n${content}\n\`\`\``);
         } else {
-          await replyFeishu(messageId, `❌ Failed to send file: ${filePath}`);
+          await replyFeishu(messageId, `❌ Failed to send file (${Math.round(stat.size / 1024)}KB): ${filePath.split("/").pop()}`);
         }
       } catch {
-        await replyFeishu(messageId, `❌ Failed to send file: ${filePath}`);
+        await replyFeishu(messageId, `❌ Failed to send file: ${filePath.split("/").pop()}. Network error or file unreadable.`);
       }
     }
   };
