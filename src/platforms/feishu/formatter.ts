@@ -2,6 +2,31 @@ import { splitMessage } from "../../utils/helpers.js";
 
 const FEISHU_MAX_LEN = 30000;
 
+/**
+ * Convert standard markdown to Feishu lark_md format.
+ * lark_md doesn't support # headers or ![image] syntax — convert them.
+ */
+export function markdownToLarkMd(text: string): string {
+  // Protect code blocks from transformation
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```[\s\S]*?```/g, (match) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(match);
+    return `\x00FSCB${idx}\x00`;
+  });
+
+  // Headers → bold (lark_md has no header support)
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, "**$1**");
+
+  // Image links → regular links (lark_md has no inline image support)
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "[$1]($2)");
+
+  // Restore code blocks
+  result = result.replace(/\x00FSCB(\d+)\x00/g, (_m, idx) => codeBlocks[Number(idx)]);
+
+  return result;
+}
+
 export function formatFeishuReply(text: string): string[] {
   return splitMessage(text, FEISHU_MAX_LEN);
 }
@@ -23,16 +48,19 @@ export function buildFeishuCard(text: string, title?: string, color?: string): o
   // `inline code`, and code blocks via markdown fence
   const elements: any[] = [];
 
+  // Convert standard markdown to lark_md compatible format
+  let larkText = markdownToLarkMd(text);
+
   // Split text into chunks that fit card element limits (~30k chars)
-  if (text.length > FEISHU_MAX_LEN) {
-    text = text.slice(0, FEISHU_MAX_LEN - 10) + "\n...";
+  if (larkText.length > FEISHU_MAX_LEN) {
+    larkText = larkText.slice(0, FEISHU_MAX_LEN - 10) + "\n...";
   }
 
   elements.push({
     tag: "div",
     text: {
       tag: "lark_md",
-      content: text,
+      content: larkText,
     },
   });
 
@@ -70,7 +98,7 @@ export function buildFeishuStreamCard(text: string, isComplete = false): object 
       tag: "div",
       text: {
         tag: "lark_md",
-        content: text,
+        content: markdownToLarkMd(text),
       },
     });
   }

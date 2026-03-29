@@ -1,6 +1,8 @@
 import { splitMessage } from "../../utils/helpers.js";
 
 const TG_MAX_LEN = 4096;
+/** Split markdown at a smaller limit so HTML tags don't push past TG_MAX_LEN */
+const TG_MD_SPLIT_LEN = 3200;
 
 /**
  * Escape HTML entities in text that is NOT inside code blocks.
@@ -54,8 +56,11 @@ export function markdownToTelegramHtml(text: string): string {
   // Strikethrough: ~~text~~
   result = result.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
-  // Links: [text](url)
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  // Links: [text](url) — encode quotes in URL to prevent attribute breakout
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, linkText, url) => {
+    const safeUrl = url.replace(/"/g, "%22");
+    return `<a href="${safeUrl}">${linkText}</a>`;
+  });
 
   // Headers: # text → bold
   result = result.replace(/^#{1,6}\s+(.+)$/gm, "\n<b>$1</b>");
@@ -68,11 +73,24 @@ export function markdownToTelegramHtml(text: string): string {
 }
 
 /**
- * Format and split Telegram reply. Converts markdown → HTML.
+ * Format and split Telegram reply.
+ * Splits markdown FIRST, then converts each chunk to HTML.
+ * This prevents splitMessage from breaking HTML tags mid-tag,
+ * which Telegram would reject as invalid HTML.
  */
 export function formatTelegramReply(text: string): string[] {
-  const html = markdownToTelegramHtml(text);
-  return splitMessage(html, TG_MAX_LEN);
+  const mdChunks = splitMessage(text, TG_MD_SPLIT_LEN);
+  const result: string[] = [];
+  for (const chunk of mdChunks) {
+    const html = markdownToTelegramHtml(chunk);
+    if (html.length <= TG_MAX_LEN) {
+      result.push(html);
+    } else {
+      // Rare: HTML entity expansion exceeded limit. Fall back to escaped plain text.
+      result.push(escapeHtml(chunk).slice(0, TG_MAX_LEN));
+    }
+  }
+  return result;
 }
 
 /**

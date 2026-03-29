@@ -158,10 +158,21 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
       try {
         const html = formatTelegramStream(updatedText);
         await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
-      } catch {
-        // Edit can fail if content unchanged or message too old
+      } catch (err) {
+        logger.debug({ err }, "Telegram stream HTML update failed, retrying plain");
         try {
           await ctx.api.editMessageText(chatId, Number(msgId), updatedText.slice(0, 4096));
+        } catch { /* edit failures often expected during streaming */ }
+      }
+    },
+    finalizeStream: async (msgId: string, finalText: string): Promise<void> => {
+      try {
+        const html = formatTelegramStream(finalText);
+        await ctx.api.editMessageText(chatId, Number(msgId), html, { parse_mode: "HTML" });
+      } catch (err) {
+        logger.debug({ err }, "Telegram stream HTML finalize failed, retrying plain");
+        try {
+          await ctx.api.editMessageText(chatId, Number(msgId), finalText.slice(0, 4096));
         } catch { /* ignore */ }
       }
     },
@@ -175,11 +186,14 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     for (const part of parts) {
       try {
         await ctx.reply(part, { parse_mode: "HTML" });
-      } catch {
-        // Retry without HTML if formatting fails
+      } catch (err) {
+        logger.warn({ err }, "Telegram HTML reply failed, retrying as plain text");
         try {
-          await ctx.reply(filtered.slice(0, 4096));
-        } catch { /* ignore */ }
+          // Strip HTML tags from the failed part and send as plain text
+          await ctx.reply(part.replace(/<[^>]+>/g, "").slice(0, 4096));
+        } catch (innerErr) {
+          logger.error({ err: innerErr }, "Telegram plain text reply also failed");
+        }
       }
     }
   };
