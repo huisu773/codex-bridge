@@ -1,11 +1,25 @@
 import { config } from "./config.js";
 import { logger } from "./utils/logger.js";
 import { loadSessionsFromDisk, cleanExpiredSessions } from "./core/session-manager.js";
+import { cancelAllTasks } from "./core/codex-executor.js";
 import { registerNativeCommands } from "./commands/native.js";
 import { registerCustomCommands } from "./commands/custom.js";
 import { registerHelpCommand } from "./commands/help.js";
 import { startTelegramBot, stopTelegramBot } from "./platforms/telegram/bot.js";
 import { startFeishuBot, stopFeishuBot } from "./platforms/feishu/bot.js";
+
+/** Wrap a promise with a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} startup timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+const PLATFORM_STARTUP_TIMEOUT = 15_000;
+const SHUTDOWN_GRACE_MS = 10_000;
 
 async function main() {
   logger.info("=== Codex Bridge starting ===");
@@ -16,14 +30,6 @@ async function main() {
     webhookPort: config.webhook.port,
   }, "Configuration loaded");
 
-  // Security warnings
-  if (config.telegram.allowedUserIds.length === 0) {
-    logger.warn("⚠️  ALLOWED_TELEGRAM_IDS is empty — ALL Telegram users can access the bot!");
-  }
-  if (config.feishu.allowedUserIds.length === 0) {
-    logger.warn("⚠️  ALLOWED_FEISHU_IDS is empty — ALL Feishu users can access the bot!");
-  }
-
   // Load existing sessions
   loadSessionsFromDisk();
 
@@ -33,20 +39,16 @@ async function main() {
   registerHelpCommand();
   logger.info("Commands registered");
 
-  // Start platforms
-  const startups: Promise<void>[] = [];
-  startups.push(
-    startTelegramBot().catch((err) => {
-      logger.error({ err }, "Failed to start Telegram bot");
-    }),
-  );
-  startups.push(
-    startFeishuBot().catch((err) => {
-      logger.error({ err }, "Failed to start Feishu bot");
-    }),
-  );
-
-  await Promise.all(startups);
+  // Start platforms independently with timeout — one failure doesn't block the other
+  const results = await Promise.allSettled([
+    withTimeout(startTelegramBot(), PLATFORM_STARTUP_TIMEOUT, "Telegram"),
+    withTimeout(startFeishuBot(), PLATFORM_STARTUP_TIMEOUT, "Feishu"),
+  ]);
+  for (const r of results) {
+    if (r.status === "rejected") {
+      logger.error({ err: r.reason }, "Platform startup failed (non-fatal, other platforms may still work)");
+    }
+  }
 
   // Periodic session cleanup (every hour)
   setInterval(() => {
@@ -56,11 +58,26 @@ async function main() {
   logger.info("=== Codex Bridge is running ===");
 }
 
-// Graceful shutdown
+// Graceful shutdown with timeout
 function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down...");
-  stopTelegramBot();
-  stopFeishuBot();
+
+  // Force exit if graceful shutdown takes too long
+  const forceTimer = setTimeout(() => {
+    logger.warn("Graceful shutdown timed out, forcing exit");
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS);
+  forceTimer.unref();
+
+  try {
+    const cancelled = cancelAllTasks();
+    if (cancelled > 0) logger.info({ cancelled }, "Cancelled running tasks");
+    stopTelegramBot();
+    stopFeishuBot();
+  } catch (err) {
+    logger.error({ err }, "Error during shutdown cleanup");
+  }
+
   process.exit(0);
 }
 

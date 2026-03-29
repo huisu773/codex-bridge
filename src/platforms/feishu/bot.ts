@@ -87,8 +87,17 @@ async function connectFeishuWS(): Promise<void> {
   }
 }
 
+const MAX_RECONNECT_ATTEMPTS = 50;
+
 function scheduleReconnect(): void {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    logger.error(
+      { attempts: reconnectAttempts },
+      "Feishu WS max reconnect attempts reached — giving up. Restart the service to retry.",
+    );
+    return;
+  }
   const backoffMs = Math.min(1000 * Math.pow(2, reconnectAttempts), 60_000);
   reconnectAttempts++;
   logger.info({ backoffMs, attempt: reconnectAttempts }, "Scheduling Feishu WS reconnect");

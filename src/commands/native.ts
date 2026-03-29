@@ -361,8 +361,6 @@ export function registerNativeCommands(): void {
             },
           });
 
-          clearInterval(heartbeatInterval);
-
           // Save codex thread ID for multi-turn
           if (result.threadId && result.threadId !== session.codexSessionId) {
             updateCodexSessionId(session, result.threadId);
@@ -469,7 +467,6 @@ export function registerNativeCommands(): void {
             }
           }
         } catch (err) {
-          clearInterval(heartbeatInterval);
           const errMsg = `❌ Execution error: ${err instanceof Error ? err.message : String(err)}`;
           // Always try to finalize stream card to remove "Generating..." indicator
           if (streamMsgId) {
@@ -482,6 +479,8 @@ export function registerNativeCommands(): void {
           } else {
             await sendReply(errMsg);
           }
+        } finally {
+          clearInterval(heartbeatInterval);
         }
       });
     },
