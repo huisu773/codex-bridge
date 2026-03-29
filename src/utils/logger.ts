@@ -10,8 +10,14 @@ if (!existsSync(logDir)) {
 
 const targets: pino.TransportTargetOptions[] = [
   {
-    target: "pino/file",
-    options: { destination: config.log.file, mkdir: true },
+    target: "pino-roll",
+    options: {
+      file: config.log.file,
+      frequency: "daily",
+      dateFormat: "yyyy-MM-dd",
+      limit: { count: 7 }, // Keep last 7 days of logs
+      mkdir: true,
+    },
     level: config.log.level,
   },
   {
