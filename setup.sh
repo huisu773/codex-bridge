@@ -134,6 +134,18 @@ prompt_value "Allowed User Open IDs (comma-separated)" "ALLOWED_FEISHU_IDS" "" "
 
 header "Codex Settings"
 prompt_value "Codex CLI path" "CODEX_BIN" "$CODEX_BIN_DEFAULT" "required"
+
+# Verify Codex CLI is callable
+CODEX_PATH="${ENV_VALUES[CODEX_BIN]}"
+if [[ -n "$CODEX_PATH" ]]; then
+  if [[ -x "$CODEX_PATH" ]] || command -v "$CODEX_PATH" &>/dev/null; then
+    CODEX_VER=$("$CODEX_PATH" --version 2>/dev/null || echo "unknown")
+    ok "Codex CLI verified: $CODEX_VER"
+  else
+    warn "Cannot verify Codex CLI at '$CODEX_PATH' — it may not be installed or not in PATH"
+  fi
+fi
+
 prompt_value "Default model" "CODEX_MODEL" "gpt-5.3-codex"
 prompt_value "Working directory" "CODEX_WORKING_DIR" "$HOME/codex-workspace"
 
@@ -168,6 +180,13 @@ fi
 
 # ─── Write .env ──────────────────────────────────────────────
 header "Writing Configuration"
+
+# Backup existing .env before overwriting
+if [[ -f "$ENV_FILE" ]]; then
+  BACKUP="$ENV_FILE.bak.$(date +%Y%m%d_%H%M%S)"
+  cp "$ENV_FILE" "$BACKUP"
+  ok "Backed up existing .env to $BACKUP"
+fi
 
 cat > "$ENV_FILE" << ENVEOF
 # Codex Bridge — Configuration

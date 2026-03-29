@@ -323,8 +323,8 @@ export function recordFileSent(
       platform,
     };
     recordFile(session, record);
-  } catch {
-    // Ignore
+  } catch (err) {
+    logger.warn({ err, filePath }, "Failed to record file sent");
   }
 }
 
@@ -360,8 +360,8 @@ export function listAllSessions(): Session[] {
         if (!session.stats) session.stats = { totalGeneratedFiles: 0, totalReceivedFiles: 0, totalTokensUsed: 0 };
         if (session.isCustomWorkingDir === undefined) session.isCustomWorkingDir = false;
         sessions.push(session);
-      } catch {
-        // Skip corrupted sessions
+      } catch (err) {
+        logger.warn({ err, metaFile }, "Skipping corrupted session metadata");
       }
     }
   }
@@ -396,8 +396,8 @@ export function cleanExpiredSessions(): number {
         rmSync(dir, { recursive: true, force: true });
         cleaned++;
       }
-    } catch {
-      // Skip corrupted
+    } catch (err) {
+      logger.warn({ err, dir }, "Skipping corrupted session during cleanup");
     }
   }
 
