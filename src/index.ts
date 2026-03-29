@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { logger } from "./utils/logger.js";
 import { loadSessionsFromDisk, cleanExpiredSessions } from "./core/session-manager.js";
 import { cancelAllTasks } from "./core/codex-executor.js";
+import { cancelAllCopilotTasks, cancelAllPendingAskUser } from "./copilot/index.js";
 import { registerNativeCommands } from "./commands/native.js";
 import { registerCustomCommands } from "./commands/custom.js";
 import { registerHelpCommand } from "./commands/help.js";
@@ -28,6 +29,9 @@ async function main() {
     model: config.codex.model,
     workingDir: config.codex.workingDir,
     webhookPort: config.webhook.port,
+    engine: config.engine,
+    copilotBin: config.copilot.bin,
+    copilotModel: config.copilot.model,
   }, "Configuration loaded");
 
   // Load existing sessions
@@ -71,7 +75,9 @@ function shutdown(signal: string) {
 
   try {
     const cancelled = cancelAllTasks();
-    if (cancelled > 0) logger.info({ cancelled }, "Cancelled running tasks");
+    const copilotCancelled = cancelAllCopilotTasks();
+    cancelAllPendingAskUser();
+    if (cancelled + copilotCancelled > 0) logger.info({ cancelled, copilotCancelled }, "Cancelled running tasks");
     stopTelegramBot();
     stopFeishuBot();
   } catch (err) {

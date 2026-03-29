@@ -5,6 +5,7 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { config } from "../config.js";
+import { getEngine, setEngine, getEngineLabel, type EngineType } from "../copilot/index.js";
 
 export function registerCustomCommands(): void {
   // /exec — Execute a shell command directly
@@ -80,6 +81,44 @@ export function registerCustomCommands(): void {
         `Webhook port: ${config.webhook.port}`,
       ];
       await sendReply(lines.join("\n"));
+    },
+  });
+
+  // /engine — Switch between codex and copilot backends
+  registerCommand({
+    name: "engine",
+    aliases: ["backend"],
+    description: "Switch between Codex and Copilot CLI backends",
+    usage: "/engine [codex|copilot]",
+    execute: async (msg, args, sendReply) => {
+      const chatKey = `${msg.platform}:${msg.chatId}`;
+
+      if (!args) {
+        const label = getEngineLabel(chatKey);
+        const lines = [
+          `🔧 Current engine: **${label}**`,
+          "",
+          "Available engines:",
+          "  • `codex` — OpenAI Codex CLI (multi-turn via thread ID)",
+          "  • `copilot` — GitHub Copilot CLI (PTY + ask_user, single request)",
+          "",
+          "Switch: `/engine copilot` or `/engine codex`",
+        ];
+        await sendReply(lines.join("\n"));
+        return;
+      }
+
+      const engine = args.trim().toLowerCase();
+      if (engine !== "codex" && engine !== "copilot") {
+        await sendReply("❌ Invalid engine. Use `codex` or `copilot`.");
+        return;
+      }
+
+      setEngine(chatKey, engine as EngineType);
+      const modelInfo = engine === "copilot"
+        ? `Model: ${config.copilot.model}`
+        : `Model: ${config.codex.model}`;
+      await sendReply(`✅ Engine switched to **${engine}**\n${modelInfo}`);
     },
   });
 }

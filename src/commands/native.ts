@@ -18,6 +18,16 @@ import {
   cancelAllTasks,
   getRunningTaskCount,
 } from "../core/codex-executor.js";
+import {
+  executeCopilot,
+  cancelAllCopilotTasks,
+  getRunningCopilotCount,
+  hasPendingAskUser,
+  resolveUserResponse,
+  waitForUserResponse,
+  getEngine,
+  type AskUserEvent,
+} from "../copilot/index.js";
 import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
@@ -281,13 +291,15 @@ export function registerNativeCommands(): void {
 
   registerCommand({
     name: "cancel",
-    description: "Cancel all running Codex tasks",
+    description: "Cancel all running tasks",
     usage: "/cancel",
     execute: async (_msg, _args, sendReply) => {
-      const count = cancelAllTasks();
+      const codexCount = cancelAllTasks();
+      const copilotCount = cancelAllCopilotTasks();
+      const total = codexCount + copilotCount;
       await sendReply(
-        count > 0
-          ? `🛑 Cancelled ${count} running task(s).`
+        total > 0
+          ? `🛑 Cancelled ${total} running task(s) (codex: ${codexCount}, copilot: ${copilotCount}).`
           : "ℹ️ No running tasks to cancel.",
       );
     },
@@ -328,11 +340,17 @@ export function registerNativeCommands(): void {
   // __codex_passthrough__ — Core handler for non-command messages
   registerCommand({
     name: "__codex_passthrough__",
-    description: "Send message to Codex",
+    description: "Send message to backend engine",
     usage: "(internal)",
     hidden: true,
     execute: async (msg, _args, sendReply, sendFile) => {
       const chatKey = `${msg.platform}:${msg.chatId}`;
+
+      // Intercept ask_user responses BEFORE enqueueing (prevents deadlock)
+      if (hasPendingAskUser(chatKey)) {
+        resolveUserResponse(chatKey, msg.text);
+        return;
+      }
 
       // Enqueue task for this chat (serialize within chat, parallel across chats)
       await enqueueChatTask(chatKey, async () => {
@@ -375,31 +393,66 @@ export function registerNativeCommands(): void {
         }, 60_000);
 
         try {
-          const result = await executeCodex({
-            prompt,
-            model: session.model,
-            workingDir: session.workingDir,
-            images: imageFiles.length > 0 ? imageFiles : undefined,
-            resumeSessionId: session.codexSessionId,
-            onTextEvent: (newText, accumulated) => {
-              // Streaming: update message with accumulated text
-              if (streamMsgId && msg.updateStream) {
-                const now = Date.now();
-                if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
-                  lastStreamUpdate = now;
-                  msg.updateStream(streamMsgId, accumulated).catch(() => {});
-                }
-              }
-            },
-          });
+          const engine = getEngine(chatKey);
 
-          // Save codex thread ID for multi-turn
-          if (result.threadId && result.threadId !== session.codexSessionId) {
+          // Route to the appropriate backend engine
+          const result = engine === "copilot"
+            ? await executeCopilot({
+                prompt,
+                model: session.model,
+                workingDir: session.workingDir,
+                onTextEvent: (_newText, accumulated) => {
+                  if (streamMsgId && msg.updateStream) {
+                    const now = Date.now();
+                    if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
+                      lastStreamUpdate = now;
+                      msg.updateStream(streamMsgId, accumulated).catch(() => {});
+                    }
+                  }
+                },
+                onAskUser: async (event: AskUserEvent) => {
+                  // Format ask_user as IM text message
+                  const lines = [
+                    `❓ ${event.question}`,
+                    "",
+                    ...event.choices.map((c) => `  ${c.index}. ${c.text}`),
+                    "",
+                    "💡 回复数字选择，或输入自定义回答。",
+                  ];
+                  await sendReply(lines.join("\n"));
+
+                  // Wait for the user's response via IM
+                  return waitForUserResponse(
+                    chatKey,
+                    config.copilot.askUserTimeoutMs,
+                    event.question,
+                  );
+                },
+              })
+            : await executeCodex({
+                prompt,
+                model: session.model,
+                workingDir: session.workingDir,
+                images: imageFiles.length > 0 ? imageFiles : undefined,
+                resumeSessionId: session.codexSessionId,
+                onTextEvent: (_newText, accumulated) => {
+                  if (streamMsgId && msg.updateStream) {
+                    const now = Date.now();
+                    if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
+                      lastStreamUpdate = now;
+                      msg.updateStream(streamMsgId, accumulated).catch(() => {});
+                    }
+                  }
+                },
+              });
+
+          // Save codex thread ID for multi-turn (codex only)
+          if ("threadId" in result && result.threadId && result.threadId !== session.codexSessionId) {
             updateCodexSessionId(session, result.threadId);
           }
 
-          // Update token usage
-          if (result.usage) {
+          // Update token usage (codex only)
+          if ("usage" in result && result.usage) {
             session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
           }
 
@@ -408,10 +461,12 @@ export function registerNativeCommands(): void {
             role: "assistant",
             content: result.output,
             metadata: {
+              engine,
               exitCode: result.exitCode,
               durationMs: result.durationMs,
               newFiles: result.newFiles,
-              threadId: result.threadId,
+              ...("threadId" in result ? { threadId: result.threadId } : {}),
+              ...("askUserRounds" in result ? { askUserRounds: result.askUserRounds } : {}),
             },
           });
 
@@ -451,7 +506,7 @@ export function registerNativeCommands(): void {
           // Timeout recovery: inform user and suggest continuation
           if (result.timedOut) {
             const durationMin = Math.round(result.durationMs / 60_000);
-            const hasThread = !!result.threadId;
+            const hasThread = "threadId" in result && !!result.threadId;
             const resumeHint = hasThread
               ? "\n💡 You can send a follow-up message to continue where it left off."
               : "";

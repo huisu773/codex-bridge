@@ -26,6 +26,15 @@ export interface Config {
     bin: string;
     timeoutMs: number;
   };
+  copilot: {
+    bin: string;
+    model: string;
+    configDir: string;
+    timeoutMs: number;
+    askUserTimeoutMs: number;
+    idleTimeoutMs: number;
+  };
+  engine: "codex" | "copilot";
   session: {
     dir: string;
     maxAgeHours: number;
@@ -125,6 +134,15 @@ export function loadConfig(): Config {
       bin: optional("CODEX_BIN", "/usr/bin/codex"),
       timeoutMs: validateTimeout(Number(optional("CODEX_TIMEOUT_MS", "300000")), "CODEX_TIMEOUT_MS"),
     },
+    copilot: {
+      bin: optional("COPILOT_BIN", "/usr/local/bin/copilot"),
+      model: optional("COPILOT_MODEL", "claude-sonnet-4"),
+      configDir: resolvePath(optional("COPILOT_CONFIG_DIR", `${HOME}/.copilot-bridge`)),
+      timeoutMs: validateTimeout(Number(optional("COPILOT_TIMEOUT_MS", "300000")), "COPILOT_TIMEOUT_MS"),
+      askUserTimeoutMs: validatePositiveInt(Number(optional("COPILOT_ASK_USER_TIMEOUT_MS", "300000")), "COPILOT_ASK_USER_TIMEOUT_MS"),
+      idleTimeoutMs: validatePositiveInt(Number(optional("COPILOT_IDLE_TIMEOUT_MS", "8000")), "COPILOT_IDLE_TIMEOUT_MS"),
+    },
+    engine: (optional("DEFAULT_ENGINE", "codex") as "codex" | "copilot"),
     session: {
       dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),
       maxAgeHours: validatePositiveInt(Number(optional("SESSION_MAX_AGE_HOURS", "168")), "SESSION_MAX_AGE_HOURS"),
