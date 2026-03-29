@@ -80,6 +80,27 @@ function parseNumericIds(raw: string): number[] {
   return parseIds(raw).map(Number).filter((n) => !isNaN(n));
 }
 
+function validatePort(val: number, key: string): number {
+  if (isNaN(val) || val < 1 || val > 65535) {
+    throw new Error(`Invalid port for ${key}: ${val} (must be 1-65535)`);
+  }
+  return val;
+}
+
+function validatePositiveInt(val: number, key: string): number {
+  if (isNaN(val) || val < 0) {
+    throw new Error(`Invalid value for ${key}: ${val} (must be non-negative integer)`);
+  }
+  return Math.floor(val);
+}
+
+function validateTimeout(val: number, key: string): number {
+  if (isNaN(val) || val < 1000 || val > 7_200_000) {
+    throw new Error(`Invalid timeout for ${key}: ${val}ms (must be 1s-2h)`);
+  }
+  return val;
+}
+
 export function loadConfig(): Config {
   const HOME = process.env.HOME || "/root";
   return {
@@ -95,21 +116,21 @@ export function loadConfig(): Config {
       allowedUserIds: parseIds(optional("ALLOWED_FEISHU_IDS", "")),
     },
     webhook: {
-      port: Number(optional("WEBHOOK_PORT", "9800")),
+      port: validatePort(Number(optional("WEBHOOK_PORT", "9800")), "WEBHOOK_PORT"),
       host: optional("WEBHOOK_HOST", "127.0.0.1"),
     },
     codex: {
       model: optional("CODEX_MODEL", "gpt-5.3-codex"),
       workingDir: resolvePath(optional("CODEX_WORKING_DIR", `${HOME}/codex-workspace`)),
       bin: optional("CODEX_BIN", "/usr/bin/codex"),
-      timeoutMs: Number(optional("CODEX_TIMEOUT_MS", "300000")),
+      timeoutMs: validateTimeout(Number(optional("CODEX_TIMEOUT_MS", "300000")), "CODEX_TIMEOUT_MS"),
     },
     session: {
       dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),
-      maxAgeHours: Number(optional("SESSION_MAX_AGE_HOURS", "168")),
+      maxAgeHours: validatePositiveInt(Number(optional("SESSION_MAX_AGE_HOURS", "168")), "SESSION_MAX_AGE_HOURS"),
     },
     security: {
-      rateLimitPerMinute: Number(optional("RATE_LIMIT_PER_MINUTE", "30")),
+      rateLimitPerMinute: validatePositiveInt(Number(optional("RATE_LIMIT_PER_MINUTE", "30")), "RATE_LIMIT_PER_MINUTE"),
     },
     stt: {
       provider: optional("STT_PROVIDER", "none"),
@@ -120,8 +141,8 @@ export function loadConfig(): Config {
       language: optional("STT_LANGUAGE", ""),
     },
     limits: {
-      fiveHourMaxRequests: Number(optional("FIVE_HOUR_MAX_REQUESTS", "50")),
-      weeklyMaxRequests: Number(optional("WEEKLY_MAX_REQUESTS", "1000")),
+      fiveHourMaxRequests: validatePositiveInt(Number(optional("FIVE_HOUR_MAX_REQUESTS", "50")), "FIVE_HOUR_MAX_REQUESTS"),
+      weeklyMaxRequests: validatePositiveInt(Number(optional("WEEKLY_MAX_REQUESTS", "1000")), "WEEKLY_MAX_REQUESTS"),
     },
     log: {
       level: optional("LOG_LEVEL", "info"),

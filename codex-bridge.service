@@ -7,12 +7,34 @@ Type=simple
 User=root
 WorkingDirectory=/root/codex-workspace/codex-bridge
 ExecStart=/usr/bin/node /root/codex-workspace/codex-bridge/dist/index.js
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:/root/codex-workspace/codex-bridge/logs/systemd.log
-StandardError=append:/root/codex-workspace/codex-bridge/logs/systemd-error.log
 Environment=NODE_ENV=production
 EnvironmentFile=/root/codex-workspace/codex-bridge/.env
+
+# Restart policy with burst protection
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Timeouts
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+# Resource limits
+MemoryMax=768M
+LimitNOFILE=65536
+LimitNPROC=1024
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/root/codex-workspace
+
+# Logging
+StandardOutput=append:/root/codex-workspace/codex-bridge/logs/systemd.log
+StandardError=append:/root/codex-workspace/codex-bridge/logs/systemd-error.log
 
 [Install]
 WantedBy=multi-user.target
