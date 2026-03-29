@@ -222,7 +222,9 @@ export async function handleFeishuEvent(event: any): Promise<void> {
             content: JSON.stringify(card),
           },
         });
-        return (resp as any)?.data?.message_id || "";
+        const replyMsgId = (resp as any)?.data?.message_id || "";
+        logger.info({ replyMsgId, originalMsgId: messageId }, "Feishu stream started");
+        return replyMsgId;
       } catch (err) {
         logger.error({ err }, "Failed to send Feishu stream start");
         return "";
@@ -239,7 +241,6 @@ export async function handleFeishuEvent(event: any): Promise<void> {
           },
         });
       } catch (err) {
-        // Card update can fail if content unchanged
         logger.debug({ err }, "Feishu stream update failed (may be expected)");
       }
     },
@@ -247,14 +248,16 @@ export async function handleFeishuEvent(event: any): Promise<void> {
       if (!msgId) return;
       try {
         const card = buildFeishuStreamCard(finalText, true);
+        logger.info({ msgId, isComplete: true, contentLen: finalText.length }, "Feishu stream finalizing");
         await client!.im.message.patch({
           path: { message_id: msgId },
           data: {
             content: JSON.stringify(card),
           },
         });
+        logger.info({ msgId }, "Feishu stream finalized successfully");
       } catch (err) {
-        logger.debug({ err }, "Feishu stream finalize failed (may be expected)");
+        logger.warn({ err, msgId }, "Feishu stream finalize failed");
       }
     },
   };
