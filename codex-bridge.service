@@ -1,0 +1,18 @@
+[Unit]
+Description=Codex Bridge - Feishu & Telegram integration
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/codex-workspace/codex-bridge
+ExecStart=/usr/bin/node /root/codex-workspace/codex-bridge/dist/index.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/root/codex-workspace/codex-bridge/logs/systemd.log
+StandardError=append:/root/codex-workspace/codex-bridge/logs/systemd-error.log
+Environment=NODE_ENV=production
+EnvironmentFile=/root/codex-workspace/codex-bridge/.env
+
+[Install]
+WantedBy=multi-user.target

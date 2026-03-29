@@ -1,0 +1,277 @@
+import { spawn, type ChildProcess, execSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { writeFileSync, readFileSync, unlinkSync, existsSync, readdirSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+
+export interface CodexExecOptions {
+  prompt: string;
+  model?: string;
+  workingDir?: string;
+  images?: string[];
+  timeoutMs?: number;
+  onProgress?: (chunk: string) => void;
+}
+
+export interface CodexExecResult {
+  success: boolean;
+  output: string;
+  exitCode: number;
+  durationMs: number;
+  usage?: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  newFiles: string[];
+}
+
+export interface RealUsageStats {
+  fiveHour: { requests: number; tokens: number };
+  weekly: { requests: number; tokens: number };
+  fiveHourResetAt: Date;
+  weeklyResetAt: Date;
+}
+
+const CODEX_STATE_DB = join(process.env.HOME || "/root", ".codex", "state_5.sqlite");
+
+const AUTH_FILE = join(process.env.HOME || "/root", ".codex", "auth.json");
+
+export function getRealUsageStats(): RealUsageStats {
+  const now = Math.floor(Date.now() / 1000);
+  const fiveHrAgo = now - 5 * 3600;
+  const weekAgo = now - 7 * 24 * 3600;
+
+  let fiveHour = { requests: 0, tokens: 0 };
+  let weekly = { requests: 0, tokens: 0 };
+  let earliestFiveHr = 0;
+  let earliestWeekly = 0;
+
+  try {
+    if (existsSync(CODEX_STATE_DB)) {
+      const fiveHrResult = execSync(
+        `sqlite3 "${CODEX_STATE_DB}" "SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${fiveHrAgo};"`,
+        { encoding: "utf-8", timeout: 5000 },
+      ).trim();
+      const fiveHrParts = fiveHrResult.split("|");
+      fiveHour = { requests: Number(fiveHrParts[0]) || 0, tokens: Number(fiveHrParts[1]) || 0 };
+      earliestFiveHr = Number(fiveHrParts[2]) || 0;
+
+      const weeklyResult = execSync(
+        `sqlite3 "${CODEX_STATE_DB}" "SELECT COUNT(*), COALESCE(SUM(tokens_used),0), MIN(created_at) FROM threads WHERE created_at >= ${weekAgo};"`,
+        { encoding: "utf-8", timeout: 5000 },
+      ).trim();
+      const weeklyParts = weeklyResult.split("|");
+      weekly = { requests: Number(weeklyParts[0]) || 0, tokens: Number(weeklyParts[1]) || 0 };
+      earliestWeekly = Number(weeklyParts[2]) || 0;
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to read Codex state DB for usage stats");
+  }
+
+  // Rolling window: reset = oldest_request_in_window + window_duration
+  const fiveHourResetAt = earliestFiveHr
+    ? new Date((earliestFiveHr + 5 * 3600) * 1000)
+    : new Date((now + 5 * 3600) * 1000);
+
+  const weeklyResetAt = earliestWeekly
+    ? new Date((earliestWeekly + 7 * 24 * 3600) * 1000)
+    : new Date((now + 7 * 24 * 3600) * 1000);
+
+  return { fiveHour, weekly, fiveHourResetAt, weeklyResetAt };
+}
+
+const runningProcesses = new Map<string, ChildProcess>();
+
+// Snapshot files in directory (non-recursive, with mtime) to detect new/modified files
+function snapshotDir(dir: string): Map<string, number> {
+  const snap = new Map<string, number>();
+  try {
+    const output = execSync(
+      `find "${dir}" -maxdepth 3 -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/logs/*' -not -name '*.log' -not -name '*.sqlite*' -not -name '*.lock' -not -name 'package-lock.json' -not -path '*/dist/*' -not -path '*/.codex/*' -not -path '*/sessions/*' -printf '%T@ %p\n' 2>/dev/null | head -5000`,
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    for (const line of output.trim().split("\n").filter(Boolean)) {
+      const spaceIdx = line.indexOf(" ");
+      if (spaceIdx > 0) {
+        const mtime = parseFloat(line.slice(0, spaceIdx));
+        const path = line.slice(spaceIdx + 1);
+        snap.set(path, mtime);
+      }
+    }
+  } catch {
+    // Ignore snapshot errors
+  }
+  return snap;
+}
+
+function diffSnapshots(before: Map<string, number>, after: Map<string, number>): string[] {
+  const newFiles: string[] = [];
+  for (const [path, mtime] of after) {
+    const prevMtime = before.get(path);
+    if (prevMtime === undefined || mtime > prevMtime) {
+      newFiles.push(path);
+    }
+  }
+  return newFiles;
+}
+
+export async function executeCodex(
+  opts: CodexExecOptions,
+): Promise<CodexExecResult> {
+  const model = opts.model || config.codex.model;
+  const workDir = opts.workingDir || config.codex.workingDir;
+  const timeout = opts.timeoutMs || 300_000; // 5 min default
+
+  // Snapshot files before execution to detect new/modified files
+  const beforeSnap = snapshotDir(workDir);
+
+  // Use -o to capture final output to a temp file
+  const outputFile = join(tmpdir(), `codex-out-${randomUUID().slice(0, 8)}.txt`);
+
+  const args = [
+    "exec",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "-m", model,
+    "-C", workDir,
+    "-o", outputFile,
+    "--json",
+    opts.prompt,
+  ];
+
+  if (opts.images) {
+    for (const img of opts.images) {
+      args.splice(args.indexOf("--json"), 0, "-i", img);
+    }
+  }
+
+  logger.info({ model, workDir, promptLen: opts.prompt.length }, "Executing codex");
+
+  const start = Date.now();
+  const execId = randomUUID().slice(0, 8);
+
+  return new Promise<CodexExecResult>((resolve) => {
+    const proc = spawn(config.codex.bin, args, {
+      cwd: workDir,
+      env: { ...process.env },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    runningProcesses.set(execId, proc);
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stdout += text;
+      opts.onProgress?.(text);
+    });
+
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        if (!proc.killed) proc.kill("SIGKILL");
+      }, 5000);
+    }, timeout);
+
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      runningProcesses.delete(execId);
+      const durationMs = Date.now() - start;
+
+      // Detect new/modified files
+      const afterSnap = snapshotDir(workDir);
+      const newFiles = diffSnapshots(beforeSnap, afterSnap);
+
+      // Read the captured output file if it exists
+      let finalOutput = "";
+      if (existsSync(outputFile)) {
+        try {
+          finalOutput = readFileSync(outputFile, "utf-8");
+          unlinkSync(outputFile);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      // Parse JSON events from stdout for usage tracking
+      let usage: CodexExecResult["usage"] = undefined;
+      let agentText = "";
+      try {
+        for (const line of stdout.split("\n").filter(Boolean)) {
+          const event = JSON.parse(line);
+          if (event.type === "turn.completed" && event.usage) {
+            usage = {
+              inputTokens: event.usage.input_tokens || 0,
+              outputTokens: event.usage.output_tokens || 0,
+              cachedTokens: event.usage.cached_input_tokens || 0,
+            };
+          }
+          if (event.type === "item.completed" && event.item?.text) {
+            agentText += event.item.text + "\n";
+          }
+        }
+      } catch {
+        // Non-JSON output, use as-is
+      }
+
+      // Prefer -o file output, then parsed agent text, then raw stdout
+      const output = finalOutput || agentText.trim() || stdout || stderr;
+
+      logger.info(
+        { exitCode: code, durationMs, outputLen: output.length, usage, newFilesCount: newFiles.length },
+        "Codex execution completed",
+      );
+
+      resolve({
+        success: code === 0,
+        output: output.trim(),
+        exitCode: code ?? 1,
+        durationMs,
+        usage,
+        newFiles,
+      });
+    });
+
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      runningProcesses.delete(execId);
+      logger.error({ err }, "Codex spawn error");
+      resolve({
+        success: false,
+        output: `Error spawning codex: ${err.message}`,
+        exitCode: 1,
+        durationMs: Date.now() - start,
+        newFiles: [],
+      });
+    });
+  });
+}
+
+export function cancelRunningTask(execId: string): boolean {
+  const proc = runningProcesses.get(execId);
+  if (proc) {
+    proc.kill("SIGTERM");
+    runningProcesses.delete(execId);
+    return true;
+  }
+  return false;
+}
+
+export function cancelAllTasks(): number {
+  let count = 0;
+  for (const [id, proc] of runningProcesses) {
+    proc.kill("SIGTERM");
+    runningProcesses.delete(id);
+    count++;
+  }
+  return count;
+}
+
+export function getRunningTaskCount(): number {
+  return runningProcesses.size;
+}
