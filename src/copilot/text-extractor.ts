@@ -22,7 +22,7 @@ export function extractAssistantText(rawOutput: string): string {
 
   // Remove tool status lines (spinner indicators)
   const withoutTools = withoutBoxes.replace(
-    /[●◉◎○◐]\s+(?:Running|Working|Executing|Reading|Writing|Searching|Completed|Cancelled).*/g,
+    /[●◉◎○◐]\s+.*/g,
     "",
   );
 
@@ -35,14 +35,26 @@ export function extractAssistantText(rawOutput: string): string {
   // Remove selection markers
   const withoutMarkers = withoutPrompt.replace(/❯\s+.*/g, "");
 
-  // Remove banner/logo fragments (common ASCII art patterns)
+  // Remove banner/logo and box-drawing fragments
   const withoutBanner = withoutMarkers.replace(
-    /[░▒▓█▄▀╔╗╚╝║═┌┐└┘├┤┬┴┼]{3,}.*/g,
+    /[░▒▓█▄▀╔╗╚╝║═┌┐└┘├┤┬┴┼╭╮╰╯│─]{2,}.*/g,
+    "",
+  );
+
+  // Remove lines that are only box-drawing chars, spaces, or choice numbers
+  const withoutBoxLines = withoutBanner.replace(
+    /^[\s│─╭╮╰╯┌┐└┘├┤┬┴┼║═]*$/gm,
+    "",
+  );
+
+  // Remove numbered choice lines (from ask_user rendering residue)
+  const withoutChoices = withoutBoxLines.replace(
+    /^\s*\d+\.\s+\S.{0,60}$/gm,
     "",
   );
 
   // Collapse excessive whitespace but preserve paragraph breaks
-  const collapsed = withoutBanner
+  const collapsed = withoutChoices
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
