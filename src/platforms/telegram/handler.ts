@@ -11,6 +11,7 @@ import { createReadStream } from "node:fs";
 import type { PlatformMessage, PlatformFile } from "../../platforms/types.js";
 import { InputFile } from "grammy";
 import { withRetry } from "../../utils/retry.js";
+import { MessageDeduplicator } from "../common.js";
 
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 
@@ -33,26 +34,7 @@ async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffe
 }
 
 // ─── Message dedup (prevents re-processing on grammy offset re-delivery) ───
-const processedTelegramMsgs = new Map<number, number>();
-const TG_DEDUP_TTL = 120_000; // 2 minutes
-const TG_DEDUP_MAX = 5_000;
-
-function isTelegramDuplicate(msgId: number): boolean {
-  const now = Date.now();
-  // Prune expired entries
-  if (processedTelegramMsgs.size > 100) {
-    for (const [id, ts] of processedTelegramMsgs) {
-      if (now - ts > TG_DEDUP_TTL) processedTelegramMsgs.delete(id);
-    }
-  }
-  if (processedTelegramMsgs.size >= TG_DEDUP_MAX) {
-    const oldest = processedTelegramMsgs.keys().next().value;
-    if (oldest !== undefined) processedTelegramMsgs.delete(oldest);
-  }
-  if (processedTelegramMsgs.has(msgId)) return true;
-  processedTelegramMsgs.set(msgId, now);
-  return false;
-}
+const telegramDedup = new MessageDeduplicator<number>(120_000);
 
 export async function handleTelegramMessage(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
@@ -63,7 +45,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
 
   // Dedup: prevent re-processing of the same message on bot restart
   const msgId = ctx.message?.message_id;
-  if (msgId && isTelegramDuplicate(msgId)) {
+  if (msgId && telegramDedup.isDuplicate(msgId)) {
     logger.debug({ msgId, chatId }, "Telegram message already processed (dedup)");
     return;
   }
