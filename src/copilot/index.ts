@@ -1,5 +1,5 @@
 /**
- * Copilot CLI PTY integration — public API.
+ * Copilot CLI integration — public API.
  *
  * All Copilot-specific code lives in src/copilot/.
  * Import from this barrel module to keep the rest of the codebase clean.
@@ -33,7 +33,3 @@ export {
   restoreEngine,
   type EngineType,
 } from "./engine-state.js";
-
-export { isAskUserVisible, parseAskUserFromRaw } from "./ask-user-parser.js";
-export { stripAnsi } from "./ansi-utils.js";
-export { extractAssistantText } from "./text-extractor.js";

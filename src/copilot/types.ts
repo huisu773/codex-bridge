@@ -25,10 +25,9 @@ export interface CopilotExecOptions {
   model?: string;
   workingDir?: string;
   timeoutMs?: number;
-  images?: string[]; // image file paths (for future support)
+  resumeSessionId?: string; // Pass to --resume for multi-turn
   onProgress?: (chunk: string) => void;
   onTextEvent?: (text: string, accumulated: string) => void;
-  onAskUser?: (event: AskUserEvent) => Promise<AskUserResponse>;
 }
 
 export interface CopilotExecResult {
@@ -39,5 +38,5 @@ export interface CopilotExecResult {
   timedOut: boolean;
   newFiles: string[];
   askUserRounds: number;
-  usage?: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  sessionId?: string; // Copilot session ID for --resume multi-turn
 }

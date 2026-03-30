@@ -7,6 +7,7 @@ import {
   deactivateSession,
   updateSessionModel,
   updateCodexSessionId,
+  updateCopilotSessionId,
   listAllSessions,
   appendConversation,
   saveGeneratedFile,
@@ -24,9 +25,7 @@ import {
   getRunningCopilotCount,
   hasPendingAskUser,
   resolveUserResponse,
-  waitForUserResponse,
   getEngine,
-  type AskUserEvent,
 } from "../copilot/index.js";
 import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
@@ -200,7 +199,7 @@ export function registerNativeCommands(): void {
             `Workdir: ${session.workingDir}`,
             `📁 Session: ${session.sessionDir || "N/A"}`,
             engine === "copilot"
-              ? `🔗 Copilot session: ${session.copilotSessionId || "stateless"}`
+              ? `🔗 Copilot session: ${session.copilotSessionId || "none"}`
               : `🔗 Codex thread: ${session.codexSessionId || "none"}`,
             `📊 Tokens used: ${session.stats.totalTokensUsed}`,
           ].join("\n")
@@ -273,6 +272,7 @@ export function registerNativeCommands(): void {
             prompt: compactPrompt,
             model: session.model,
             workingDir: session.workingDir,
+            resumeSessionId: session.copilotSessionId || undefined,
           })
         : await executeCodex({
             prompt: compactPrompt,
@@ -360,7 +360,7 @@ export function registerNativeCommands(): void {
         const chatKey = `${msg.platform}:${msg.chatId}`;
         const engine = getEngine(chatKey);
         const threadInfo = engine === "copilot"
-          ? `🔗 Engine: copilot\n🔗 Copilot session: ${session.copilotSessionId || "none (stateless)"}`
+          ? `🔗 Engine: copilot\n🔗 Copilot session: ${session.copilotSessionId || "none (new session on next message)"}`
           : `🔗 Engine: codex\n🔗 Codex thread: ${session.codexSessionId || "none (will be created on next message)"}`;
         await sendReply(
           `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}\n${threadInfo}`,
@@ -437,7 +437,7 @@ export function registerNativeCommands(): void {
                 prompt,
                 model: session.model,
                 workingDir: session.workingDir,
-                images: imageFiles.length > 0 ? imageFiles : undefined,
+                resumeSessionId: session.copilotSessionId || undefined,
                 onTextEvent: (_newText, accumulated) => {
                   if (streamMsgId && msg.updateStream) {
                     const now = Date.now();
@@ -446,24 +446,6 @@ export function registerNativeCommands(): void {
                       msg.updateStream(streamMsgId, accumulated).catch(() => {});
                     }
                   }
-                },
-                onAskUser: async (event: AskUserEvent) => {
-                  // Format ask_user as IM text message
-                  const lines = [
-                    `❓ ${event.question}`,
-                    "",
-                    ...event.choices.map((c) => `  ${c.index}. ${c.text}`),
-                    "",
-                    "💡 回复数字选择，或输入自定义回答。",
-                  ];
-                  await sendReply(lines.join("\n"));
-
-                  // Wait for the user's response via IM
-                  return waitForUserResponse(
-                    chatKey,
-                    config.copilot.askUserTimeoutMs,
-                    event.question,
-                  );
                 },
               })
             : await executeCodex({
@@ -494,8 +476,13 @@ export function registerNativeCommands(): void {
             updateCodexSessionId(session, result.threadId);
           }
 
-          // Update token usage (both engines)
-          if ("usage" in result && result.usage) {
+          // Save copilot session ID for multi-turn --resume
+          if ("sessionId" in result && result.sessionId && result.sessionId !== session.copilotSessionId) {
+            updateCopilotSessionId(session, result.sessionId);
+          }
+
+          // Update token usage (codex only — Copilot doesn't expose real token counts)
+          if ("usage" in result && result.usage && engine !== "copilot") {
             session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
           }
 
@@ -509,6 +496,7 @@ export function registerNativeCommands(): void {
               durationMs: result.durationMs,
               newFiles: result.newFiles,
               ...("threadId" in result ? { threadId: result.threadId } : {}),
+              ...("sessionId" in result ? { copilotSessionId: result.sessionId } : {}),
               ...("askUserRounds" in result ? { askUserRounds: result.askUserRounds } : {}),
             },
           });
@@ -549,7 +537,8 @@ export function registerNativeCommands(): void {
           // Timeout recovery: inform user and suggest continuation
           if (result.timedOut) {
             const durationMin = Math.round(result.durationMs / 60_000);
-            const hasThread = "threadId" in result && !!result.threadId;
+            const hasThread = ("threadId" in result && !!result.threadId) ||
+              ("sessionId" in result && !!result.sessionId);
             const resumeHint = hasThread
               ? "\n💡 You can send a follow-up message to continue where it left off."
               : "";

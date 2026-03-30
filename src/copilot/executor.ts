@@ -1,37 +1,28 @@
 /**
- * Copilot CLI PTY executor.
+ * Copilot CLI executor.
  *
- * Spawns `copilot -i` in a pseudo-terminal, detects ask_user events,
- * delegates them to the IM via callbacks, simulates keystrokes for
- * user selections, and extracts the assistant's text response.
+ * Spawns `copilot -p <prompt> --output-format json --autopilot --allow-all`
+ * as a child process, parses JSONL events for assistant text, file changes,
+ * session IDs, and result data.
  *
- * Each invocation is a single premium request, regardless of how many
- * ask_user rounds occur within the turn.
+ * Uses structured JSONL output instead of PTY + TUI parsing for reliability.
+ * Multi-turn conversations use `--resume=<sessionId>`.
  */
 
-import { createRequire } from "node:module";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createInterface } from "node:readline";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { recordCopilotExecution } from "../utils/metrics.js";
-import { stripAnsi } from "./ansi-utils.js";
-import { parseAskUserFromRaw, isAskUserVisible } from "./ask-user-parser.js";
-import { extractAssistantText } from "./text-extractor.js";
 import type {
   CopilotExecOptions,
   CopilotExecResult,
-  AskUserResponse,
 } from "./types.js";
-
-// node-pty is a native CommonJS module — load via createRequire in ESM
-const require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pty: typeof import("node-pty") = require("node-pty");
 
 const execFileAsync = promisify(execFile);
 
@@ -65,26 +56,26 @@ function getInstructions(): string {
 
 // ─── Running process tracking ──────────────────────────────────────
 
-interface RunningPty {
-  term: ReturnType<typeof pty.spawn>;
+interface RunningProcess {
+  proc: ChildProcess;
   startedAt: number;
 }
 
-const runningPtys = new Map<string, RunningPty>();
+const runningProcs = new Map<string, RunningProcess>();
 
-// Periodic cleanup of stale PTY handles (configurable threshold)
+// Periodic cleanup of stale processes (configurable threshold)
 setInterval(() => {
   const now = Date.now();
   const staleMs = config.copilot.stalePtyMs;
-  for (const [id, entry] of runningPtys) {
+  for (const [id, entry] of runningProcs) {
     if (now - entry.startedAt > staleMs) {
-      logger.warn({ execId: id, elapsedMin: Math.round((now - entry.startedAt) / 60_000) }, "Cleaning up stale Copilot PTY");
+      logger.warn({ execId: id, elapsedMin: Math.round((now - entry.startedAt) / 60_000) }, "Cleaning up stale Copilot process");
       try {
-        entry.term.kill();
+        entry.proc.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-      runningPtys.delete(id);
+      runningProcs.delete(id);
     }
   }
 }, 60_000);
@@ -154,46 +145,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function simulateChoice(
-  term: ReturnType<typeof pty.spawn>,
-  choiceIndex: number,
-): Promise<void> {
-  for (let i = 0; i < choiceIndex; i++) {
-    term.write("\x1b[B"); // Down arrow
-    await sleep(200);
-  }
-  await sleep(300);
-  term.write("\r"); // Enter
-}
-
-/** Write freeform text to PTY, then press Enter. */
-async function writeFreeformText(
-  term: ReturnType<typeof pty.spawn>,
-  text: string,
-): Promise<void> {
-  // Copilot ask_user with freeform shows a text prompt after choices.
-  // We need to navigate past any visible choices first, then type.
-  // The freeform input area is at the bottom of the choice list.
-  // Press down arrows past all choices to reach freeform input, then type.
-  // However, if the ask_user has a dedicated freeform field, just typing works.
-  // We use a simple approach: clear any partial selection, then type the text.
-  for (const char of text) {
-    term.write(char);
-    await sleep(30); // Throttle to avoid buffer overflow
-  }
-  await sleep(200);
-  term.write("\r"); // Enter to submit
-}
-
-// Max auto-retries when ask_user times out before aborting
-const ASK_USER_AUTO_RETRY_LIMIT = 2;
 // Max spawn retries on transient errors
 const SPAWN_RETRY_LIMIT = 2;
 const SPAWN_RETRY_DELAY_MS = 3000;
-
-// Adaptive timeout constants
-const ACTIVITY_WINDOW_MS = 60_000; // Consider active if data received within 60s
-const EXTEND_INTERVAL_MS = 120_000; // Extend deadline by 2 min each time
 
 // ─── Main executor ─────────────────────────────────────────────────
 
@@ -231,8 +185,7 @@ async function _executeCopilotOnce(
 ): Promise<CopilotExecResult> {
   const model = opts.model || config.copilot.model;
   const workDir = opts.workingDir || config.codex.workingDir;
-  const baseTimeoutMs = opts.timeoutMs || config.copilot.timeoutMs;
-  const idleMs = config.copilot.idleTimeoutMs;
+  const timeoutMs = opts.timeoutMs || config.copilot.timeoutMs;
   const startTime = Date.now();
   const execId = randomUUID().slice(0, 8);
 
@@ -254,78 +207,51 @@ async function _executeCopilotOnce(
 
   const sessionConfigDir = setupSessionConfigDir();
 
-  // Output file for fallback text extraction
-  const outputFile = join(tmpdir(), `copilot-out-${execId}.txt`);
-
   const args = [
-    "-i",
-    opts.prompt,
+    "-p", opts.prompt,
+    "--output-format", "json",
     "--allow-all",
-    "--model",
-    model,
-    "--config-dir",
-    sessionConfigDir,
+    "--autopilot",
+    "--model", model,
+    "--config-dir", sessionConfigDir,
     "--no-color",
   ];
 
-  // Image support: splice -i flags for each image
-  if (opts.images && opts.images.length > 0) {
-    for (const img of opts.images) {
-      if (existsSync(img)) {
-        args.push("-i", img);
-      }
-    }
+  // Multi-turn: pass --resume to continue a previous session
+  if (opts.resumeSessionId) {
+    args.push("--resume", opts.resumeSessionId);
   }
 
   logger.info(
-    { model, workDir, promptLen: opts.prompt.length, execId, imageCount: opts.images?.length || 0 },
-    "Starting Copilot PTY execution",
+    { model, workDir, promptLen: opts.prompt.length, execId, resumeSession: opts.resumeSessionId || "new" },
+    "Starting Copilot JSONL execution",
   );
 
   return new Promise<CopilotExecResult>((resolve) => {
-    let rawOutput = "";
-    let lastDataTime = Date.now();
-    let lastActivityTime = Date.now(); // For adaptive timeout
-    let askUserRounds = 0;
-    let askUserAutoRetries = 0;
-    const textSegments: string[] = [];
-    let exited = false;
-    let exitCode = 0;
     let resolved = false;
+    let sessionId: string | undefined;
+    let resultExitCode = 0;
+    let askUserRounds = 0;
+    const textSegments: string[] = [];
+    let currentMessageContent = "";
+    let lastActivityTime = Date.now();
 
-    // Adaptive timeout: start with base, extend while active
-    let currentDeadline = Date.now() + baseTimeoutMs;
-
-    const term = pty.spawn(config.copilot.bin, args, {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 40,
+    const proc = spawn(config.copilot.bin, args, {
       cwd: workDir,
-      env: { ...process.env, TERM: "xterm-256color", NO_COLOR: "1" },
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
-    runningPtys.set(execId, { term, startedAt: Date.now() });
+    runningProcs.set(execId, { proc, startedAt: Date.now() });
 
     const finish = async (result: CopilotExecResult) => {
       if (resolved) return;
       resolved = true;
-      clearInterval(adaptiveTimer);
-      runningPtys.delete(execId);
-      try {
-        term.kill();
-      } catch {
-        /* ignore */
-      }
+      clearInterval(timeoutTimer);
+      runningProcs.delete(execId);
 
-      // Try to read output file if it exists (fallback)
       try {
-        if (existsSync(outputFile)) {
-          const fileOutput = readFileSync(outputFile, "utf-8").trim();
-          if (fileOutput && (!result.output || result.output === "(no output)")) {
-            result.output = fileOutput;
-          }
-          rmSync(outputFile, { force: true });
-        }
+        proc.kill("SIGTERM");
       } catch {
         /* ignore */
       }
@@ -344,6 +270,11 @@ async function _executeCopilotOnce(
         // Keep empty if snapshot fails
       }
 
+      // Use sessionId from result event, or preserved resumeSessionId
+      if (!result.sessionId) {
+        result.sessionId = sessionId || opts.resumeSessionId;
+      }
+
       // Record metrics
       recordCopilotExecution(result.success, result.durationMs, result.timedOut, result.askUserRounds);
 
@@ -355,47 +286,34 @@ async function _executeCopilotOnce(
           askUserRounds: result.askUserRounds,
           outputLen: result.output.length,
           newFileCount: result.newFiles.length,
+          sessionId: result.sessionId || "none",
         },
         "Copilot execution completed",
       );
       resolve(result);
     };
 
-    // PTY event handlers
-    term.onData((data: string) => {
-      rawOutput += data;
-      lastDataTime = Date.now();
-      lastActivityTime = Date.now();
-      opts.onProgress?.(stripAnsi(data));
-    });
+    // ─── Adaptive timeout ────────────────────────────────────
+    const ACTIVITY_WINDOW_MS = 60_000;
+    const EXTEND_INTERVAL_MS = 120_000;
+    let currentDeadline = Date.now() + timeoutMs;
 
-    term.onExit((e: { exitCode: number }) => {
-      exited = true;
-      exitCode = e.exitCode;
-    });
-
-    // Adaptive timeout: check every 5s, extend if still active
-    const adaptiveTimer = setInterval(() => {
-      if (resolved || exited) {
-        clearInterval(adaptiveTimer);
+    const timeoutTimer = setInterval(() => {
+      if (resolved) {
+        clearInterval(timeoutTimer);
         return;
       }
       const now = Date.now();
       const recentlyActive = (now - lastActivityTime) < ACTIVITY_WINDOW_MS;
 
       if (recentlyActive) {
-        // Still active — extend deadline
         currentDeadline = now + EXTEND_INTERVAL_MS;
         return;
       }
 
-      // Check if deadline has passed
       if (now > currentDeadline) {
         logger.warn({ execId, elapsed: now - startTime }, "Copilot adaptive timeout reached");
-        const output =
-          textSegments.join("\n\n").trim() ||
-          extractAssistantText(rawOutput) ||
-          "(timed out)";
+        const output = textSegments.join("\n\n").trim() || currentMessageContent.trim() || "(timed out)";
         finish({
           success: false,
           output,
@@ -408,194 +326,130 @@ async function _executeCopilotOnce(
       }
     }, 5_000);
 
-    // Wait for PTY output to stabilize
-    function waitForIdle(ms: number): Promise<void> {
-      return new Promise((res) => {
-        const check = setInterval(() => {
-          if (exited || resolved) {
-            clearInterval(check);
-            res();
-            return;
-          }
-          if (Date.now() - lastDataTime > ms) {
-            clearInterval(check);
-            res();
-          }
-        }, 500);
-        // Safety cap: don't wait forever in this loop
-        setTimeout(() => {
-          clearInterval(check);
-          res();
-        }, Math.min(ms * 12, 120_000));
-      });
-    }
+    // ─── JSONL parsing ───────────────────────────────────────
+    const rl = createInterface({ input: proc.stdout!, crlfDelay: Infinity });
 
-    // ─── Main processing loop ────────────────────────────────────
-    const processLoop = async () => {
+    rl.on("line", (line: string) => {
+      lastActivityTime = Date.now();
+      if (!line.trim()) return;
+
+      let event: {
+        type: string;
+        data?: Record<string, unknown>;
+        sessionId?: string;
+        exitCode?: number;
+        usage?: Record<string, unknown>;
+      };
       try {
-        // Wait for initial output (longer for first response + banner)
-        await waitForIdle(10_000);
+        event = JSON.parse(line);
+      } catch {
+        logger.debug({ execId, line: line.slice(0, 200) }, "Non-JSON line from Copilot");
+        return;
+      }
 
-        while (!exited && !resolved) {
-          // Real-time streaming: extract and emit text during processing
-          const currentText = extractAssistantText(rawOutput);
-          if (currentText && currentText.length > 5 && opts.onTextEvent) {
-            const allText = [...textSegments, currentText].join("\n\n");
-            opts.onTextEvent(currentText, allText);
+      switch (event.type) {
+        case "assistant.message_delta": {
+          const delta = (event.data as { deltaContent?: string })?.deltaContent;
+          if (delta) {
+            currentMessageContent += delta;
+            opts.onProgress?.(delta);
+            opts.onTextEvent?.(delta, currentMessageContent);
           }
-
-          // Check for ask_user
-          if (isAskUserVisible(rawOutput)) {
-            const parsed = parseAskUserFromRaw(rawOutput);
-
-            if (parsed && opts.onAskUser) {
-              // Extract text produced before this ask_user for streaming
-              const textBefore = extractAssistantText(rawOutput);
-              if (textBefore && textBefore.length > 5) {
-                textSegments.push(textBefore);
-                opts.onTextEvent?.(
-                  textBefore,
-                  textSegments.join("\n\n"),
-                );
-              }
-
-              logger.info(
-                {
-                  execId,
-                  round: askUserRounds + 1,
-                  question: parsed.question.slice(0, 80),
-                  choiceCount: parsed.choices.length,
-                },
-                "ask_user detected",
-              );
-
-              // Delegate to IM — this blocks until user responds or times out
-              let response: AskUserResponse;
-              try {
-                response = await opts.onAskUser({
-                  question: parsed.question,
-                  choices: parsed.choices,
-                  hasFreeform: parsed.hasFreeform,
-                  hintLine: parsed.hintLine,
-                });
-              } catch (err) {
-                logger.warn(
-                  { err, execId },
-                  "onAskUser callback failed, auto-selecting first option",
-                );
-                response = { type: "choice", choiceIndex: 0 };
-              }
-
-              askUserRounds++;
-              rawOutput = ""; // Clear buffer for next segment
-
-              if (response.type === "timeout") {
-                // Auto-retry: select first option instead of aborting
-                if (askUserAutoRetries < ASK_USER_AUTO_RETRY_LIMIT) {
-                  askUserAutoRetries++;
-                  logger.info(
-                    { execId, retry: askUserAutoRetries },
-                    "ask_user timed out, auto-selecting first option (retry)",
-                  );
-                  await simulateChoice(term, 0);
-                  await waitForIdle(idleMs);
-                  continue;
-                }
-                // Exhausted retries — ESC and end
-                logger.warn({ execId }, "ask_user retries exhausted, aborting");
-                term.write("\x1b");
-                await sleep(300);
-                term.write("\x1b");
-                await sleep(500);
-                break;
-              }
-
-              if (response.type === "cancel") {
-                term.write("\x1b");
-                await sleep(300);
-                term.write("\x1b");
-                await sleep(500);
-                break;
-              }
-
-              // Reset auto-retry counter on successful user response
-              askUserAutoRetries = 0;
-
-              if (response.type === "freeform" && response.text) {
-                // Write freeform text directly to PTY
-                await writeFreeformText(term, response.text);
-              } else if (
-                response.type === "choice" &&
-                response.choiceIndex !== undefined
-              ) {
-                await simulateChoice(term, response.choiceIndex);
-              } else {
-                // Unknown type → select first option
-                await simulateChoice(term, 0);
-              }
-
-              // Wait for next output after selection
-              await waitForIdle(idleMs);
-              continue;
-            }
-          }
-
-          // No ask_user visible — check if tools are running
-          const clean = stripAnsi(rawOutput);
-          if (
-            /[●◉◐○]\s+(Running|Working|Executing)/i.test(clean) &&
-            !exited
-          ) {
-            await sleep(2000);
-            continue;
-          }
-
-          // Output has stabilized, no ask_user, no tools → turn is complete
           break;
         }
 
-        // Extract final text
-        const finalText = extractAssistantText(rawOutput);
-        if (finalText && finalText.length > 5) {
-          textSegments.push(finalText);
+        case "assistant.message": {
+          const content = (event.data as { content?: string })?.content;
+          if (content) {
+            currentMessageContent = content;
+            textSegments.push(content);
+            opts.onTextEvent?.(content, textSegments.join("\n\n"));
+          }
+          break;
         }
 
-        const output = textSegments.join("\n\n").trim() || "(no output)";
-        const durationMs = Date.now() - startTime;
+        case "assistant.tool_call": {
+          const toolName = (event.data as { name?: string })?.name;
+          logger.debug({ execId, tool: toolName }, "Copilot tool call");
+          if (toolName === "ask_user") {
+            askUserRounds++;
+          }
+          break;
+        }
 
-        // Estimate token usage from output (rough heuristic: ~4 chars per token)
-        const estimatedOutputTokens = Math.ceil(output.length / 4);
-        const estimatedInputTokens = Math.ceil(opts.prompt.length / 4);
+        case "assistant.turn_end": {
+          if (currentMessageContent && !textSegments.includes(currentMessageContent)) {
+            textSegments.push(currentMessageContent);
+          }
+          currentMessageContent = "";
+          break;
+        }
 
-        finish({
-          success: true,
-          output,
-          exitCode: exited ? exitCode : 0,
-          durationMs,
-          timedOut: false,
-          newFiles: [], // Will be populated by finish() via snapshot diff
-          askUserRounds,
-          usage: {
-            inputTokens: estimatedInputTokens,
-            outputTokens: estimatedOutputTokens,
-            cachedTokens: 0,
-          },
-        });
-      } catch (err) {
-        logger.error({ err, execId }, "Copilot execution error");
-        finish({
-          success: false,
-          output: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          exitCode: 1,
-          durationMs: Date.now() - startTime,
-          timedOut: false,
-          newFiles: [],
-          askUserRounds,
-        });
+        case "result": {
+          sessionId = event.sessionId as string || sessionId;
+          resultExitCode = (event.exitCode as number) ?? 0;
+          logger.debug(
+            { execId, sessionId, exitCode: resultExitCode, usage: event.usage },
+            "Copilot result event",
+          );
+          break;
+        }
+
+        // Silently skip known informational events
+        case "session.start":
+        case "session.model_change":
+        case "session.mcp_server_status_changed":
+        case "session.mcp_servers_loaded":
+        case "session.tools_updated":
+        case "user.message":
+        case "assistant.reasoning_delta":
+        case "assistant.reasoning":
+        case "assistant.turn_start":
+          break;
+
+        default:
+          logger.debug({ execId, type: event.type }, "Unhandled Copilot JSONL event");
       }
-    };
+    });
 
-    processLoop();
+    // Capture stderr for error messages
+    let stderrBuf = "";
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+      lastActivityTime = Date.now();
+    });
+
+    // Process exit
+    proc.on("close", (code: number | null) => {
+      const exitCode = code ?? resultExitCode;
+      const output = textSegments.join("\n\n").trim() ||
+        currentMessageContent.trim() ||
+        (stderrBuf.trim() ? `stderr: ${stderrBuf.trim()}` : "(no output)");
+      const durationMs = Date.now() - startTime;
+
+      finish({
+        success: exitCode === 0,
+        output,
+        exitCode,
+        durationMs,
+        timedOut: false,
+        newFiles: [],
+        askUserRounds,
+        sessionId,
+      });
+    });
+
+    proc.on("error", (err: Error) => {
+      finish({
+        success: false,
+        output: `Spawn error: ${err.message}`,
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+        timedOut: false,
+        newFiles: [],
+        askUserRounds: 0,
+      });
+    });
   });
 }
 
@@ -603,18 +457,18 @@ async function _executeCopilotOnce(
 
 export function cancelAllCopilotTasks(): number {
   let count = 0;
-  for (const [id, entry] of runningPtys) {
+  for (const [id, entry] of runningProcs) {
     try {
-      entry.term.kill();
+      entry.proc.kill("SIGTERM");
     } catch {
       /* ignore */
     }
-    runningPtys.delete(id);
+    runningProcs.delete(id);
     count++;
   }
   return count;
 }
 
 export function getRunningCopilotCount(): number {
-  return runningPtys.size;
+  return runningProcs.size;
 }
