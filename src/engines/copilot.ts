@@ -163,9 +163,11 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
       resolve(result);
     };
 
-    // Adaptive timeout
-    const ACTIVITY_WINDOW_MS = 60_000;
-    const EXTEND_MS = 120_000;
+    // Adaptive timeout — generous windows for complex multi-step tasks.
+    // During long tool executions (e.g., shell commands), copilot may emit
+    // no JSONL events for extended periods.
+    const ACTIVITY_WINDOW_MS = 180_000; // 3 min inactivity before checking deadline
+    const EXTEND_MS = 300_000;          // extend deadline by 5 min on activity
     let deadline = Date.now() + timeoutMs;
 
     const timeoutTimer = setInterval(() => {
@@ -173,14 +175,14 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
       const now = Date.now();
       if ((now - lastActivity) < ACTIVITY_WINDOW_MS) { deadline = now + EXTEND_MS; return; }
       if (now > deadline) {
-        logger.warn({ execId, elapsed: now - startTime }, "Copilot timeout");
+        logger.warn({ execId, elapsed: now - startTime, lastActivityAgo: now - lastActivity }, "Copilot timeout");
         finish({
           success: false,
           output: textSegments.join("\n\n").trim() || currentMessage.trim() || "(timed out)",
           exitCode: 1, durationMs: now - startTime, timedOut: true, newFiles: [],
         });
       }
-    }, 5_000);
+    }, 10_000);
 
     // JSONL parsing
     const rl = createInterface({ input: proc.stdout!, crlfDelay: Infinity });

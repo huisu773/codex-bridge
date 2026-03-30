@@ -43,7 +43,7 @@ function executeCodexOnce(opts: EngineExecOptions): Promise<EngineExecResult> {
   const model = opts.model || config.codex.model;
   const workDir = opts.workingDir || config.codex.workingDir;
   const baseTimeout = opts.timeoutMs || config.codex.timeoutMs;
-  const EXTEND_INTERVAL = 120_000;
+  const EXTEND_INTERVAL = 300_000; // extend deadline by 5 min on activity
 
   return new Promise(async (resolve) => {
     const beforeSnap = await snapshotDir(workDir);
@@ -119,9 +119,9 @@ function executeCodexOnce(opts: EngineExecOptions): Promise<EngineExecResult> {
 
     proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); lastActivity = Date.now(); });
 
-    // Adaptive timeout
+    // Adaptive timeout — generous windows for complex multi-step tasks
     let deadline = start + baseTimeout;
-    const ACTIVITY_WINDOW = 60_000;
+    const ACTIVITY_WINDOW = 180_000; // 3 min inactivity before checking deadline
 
     const timer = setInterval(() => {
       if (closed) { clearInterval(timer); return; }
@@ -133,10 +133,10 @@ function executeCodexOnce(opts: EngineExecOptions): Promise<EngineExecResult> {
       }
       clearInterval(timer);
       timedOut = true;
-      logger.warn({ elapsed: Math.round((now - start) / 1000) }, "Codex timeout");
+      logger.warn({ elapsed: Math.round((now - start) / 1000), lastActivityAgo: now - lastActivity }, "Codex timeout");
       proc.kill("SIGTERM");
       setTimeout(() => { if (!proc.killed) proc.kill("SIGKILL"); }, 5000);
-    }, 5000);
+    }, 10_000);
 
     proc.on("close", async (code) => {
       closed = true;
