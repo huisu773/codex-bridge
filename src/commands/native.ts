@@ -435,6 +435,12 @@ export function registerNativeCommands(): void {
                 workingDir: session.workingDir,
                 images: imageFiles.length > 0 ? imageFiles : undefined,
                 resumeSessionId: session.codexSessionId,
+                onThreadStarted: (tid) => {
+                  // Persist threadId immediately so it survives crashes/restarts
+                  if (tid !== session.codexSessionId) {
+                    updateCodexSessionId(session, tid);
+                  }
+                },
                 onTextEvent: (_newText, accumulated) => {
                   if (streamMsgId && msg.updateStream) {
                     const now = Date.now();

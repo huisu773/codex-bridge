@@ -63,7 +63,10 @@ async function main() {
 }
 
 // Graceful shutdown with timeout
+let isShuttingDown = false;
 function shutdown(signal: string) {
+  if (isShuttingDown) return; // Prevent multiple invocations
+  isShuttingDown = true;
   logger.info({ signal }, "Shutting down...");
 
   // Force exit if graceful shutdown takes too long
@@ -84,7 +87,10 @@ function shutdown(signal: string) {
     logger.error({ err }, "Error during shutdown cleanup");
   }
 
-  process.exit(0);
+  // Brief grace period to let in-flight stream cards finalize
+  setTimeout(() => {
+    process.exit(0);
+  }, 2000).unref();
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));

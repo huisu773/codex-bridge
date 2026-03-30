@@ -19,6 +19,7 @@ export interface CodexExecOptions {
   resumeSessionId?: string; // codex thread ID for multi-turn
   onProgress?: (chunk: string) => void;
   onTextEvent?: (text: string, accumulated: string) => void; // called on each text item
+  onThreadStarted?: (threadId: string) => void; // called immediately when thread ID is available
 }
 
 export interface CodexExecResult {
@@ -245,6 +246,7 @@ export async function executeCodex(
           // Extract thread ID
           if (event.type === "thread.started" && event.thread_id) {
             threadId = event.thread_id;
+            opts.onThreadStarted?.(event.thread_id);
           }
           // Extract text from item.completed events for streaming
           if (event.type === "item.completed" && event.item?.text) {

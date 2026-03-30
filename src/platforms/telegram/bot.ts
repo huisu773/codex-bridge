@@ -38,12 +38,19 @@ export async function startTelegramBot(): Promise<void> {
     logger.warn({ err }, "Failed to sync Telegram slash commands");
   }
 
-  // Use long polling
-  await bot.start({
-    onStart: () => {
-      setPlatformStatus("telegram", "connected");
-      logger.info("Telegram bot started (long polling)");
-    },
+  // Start long polling. bot.start() returns a Promise that resolves only when
+  // the bot stops, so we resolve our own promise on the onStart callback to
+  // avoid blocking the startup sequence.
+  return new Promise<void>((resolve) => {
+    bot!.start({
+      onStart: () => {
+        setPlatformStatus("telegram", "connected");
+        logger.info("Telegram bot started (long polling)");
+        resolve();
+      },
+    }).catch((err: unknown) => {
+      logger.error({ err }, "Telegram bot polling stopped");
+    });
   });
 }
 

@@ -32,12 +32,41 @@ async function downloadTelegramFile(ctx: Context, fileId: string): Promise<Buffe
   }, { label: "telegram-download" });
 }
 
+// ─── Message dedup (prevents re-processing on grammy offset re-delivery) ───
+const processedTelegramMsgs = new Map<number, number>();
+const TG_DEDUP_TTL = 120_000; // 2 minutes
+const TG_DEDUP_MAX = 5_000;
+
+function isTelegramDuplicate(msgId: number): boolean {
+  const now = Date.now();
+  // Prune expired entries
+  if (processedTelegramMsgs.size > 100) {
+    for (const [id, ts] of processedTelegramMsgs) {
+      if (now - ts > TG_DEDUP_TTL) processedTelegramMsgs.delete(id);
+    }
+  }
+  if (processedTelegramMsgs.size >= TG_DEDUP_MAX) {
+    const oldest = processedTelegramMsgs.keys().next().value;
+    if (oldest !== undefined) processedTelegramMsgs.delete(oldest);
+  }
+  if (processedTelegramMsgs.has(msgId)) return true;
+  processedTelegramMsgs.set(msgId, now);
+  return false;
+}
+
 export async function handleTelegramMessage(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   const text = ctx.message?.text || ctx.message?.caption || "";
 
   if (!userId || !chatId) return;
+
+  // Dedup: prevent re-processing of the same message on bot restart
+  const msgId = ctx.message?.message_id;
+  if (msgId && isTelegramDuplicate(msgId)) {
+    logger.debug({ msgId, chatId }, "Telegram message already processed (dedup)");
+    return;
+  }
 
   if (!isAuthorizedTelegram(userId)) {
     logger.warn({ userId }, "Unauthorized Telegram user");
@@ -179,7 +208,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     },
   };
 
-  await ctx.replyWithChatAction("typing").catch(() => {});
+  ctx.replyWithChatAction("typing").catch(() => {});
 
   const sendReply = async (replyText: string) => {
     const filtered = filterSensitiveOutput(replyText);
@@ -206,5 +235,10 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     }
   };
 
-  await routeMessage(msg, sendReply, sendFile);
+  // Fire-and-forget: don't block grammy's polling loop.
+  // This lets grammy confirm update offsets quickly, preventing
+  // re-delivery of the same message on service restart.
+  routeMessage(msg, sendReply, sendFile).catch((err) => {
+    logger.error({ err, chatId, userId }, "Telegram message processing error");
+  });
 }
