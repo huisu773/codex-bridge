@@ -215,6 +215,9 @@ export function registerNativeCommands(): void {
         metrics.codex.total > 0
           ? `Codex: ${metrics.codex.total} runs (${metrics.codex.success} ok, ${metrics.codex.failed} fail), avg ${metrics.codex.avgDurationMs}ms`
           : "Codex: no runs yet",
+        metrics.copilot.total > 0
+          ? `Copilot: ${metrics.copilot.total} runs (${metrics.copilot.success} ok, ${metrics.copilot.failed} fail), avg ${metrics.copilot.avgDurationMs}ms, ${metrics.copilot.totalAskUserRounds} ask_user rounds`
+          : "Copilot: no runs yet",
         `Running: ${running} codex, ${copilotRunning} copilot`,
         "",
         "— Session —",
@@ -434,6 +437,7 @@ export function registerNativeCommands(): void {
                 prompt,
                 model: session.model,
                 workingDir: session.workingDir,
+                images: imageFiles.length > 0 ? imageFiles : undefined,
                 onTextEvent: (_newText, accumulated) => {
                   if (streamMsgId && msg.updateStream) {
                     const now = Date.now();

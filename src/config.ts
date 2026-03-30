@@ -33,6 +33,8 @@ export interface Config {
     timeoutMs: number;
     askUserTimeoutMs: number;
     idleTimeoutMs: number;
+    instructions: string; // custom system instructions (empty = use default)
+    stalePtyMs: number; // stale PTY cleanup threshold
   };
   engine: "codex" | "copilot";
   session: {
@@ -141,6 +143,8 @@ export function loadConfig(): Config {
       timeoutMs: validateTimeout(Number(optional("COPILOT_TIMEOUT_MS", "300000")), "COPILOT_TIMEOUT_MS"),
       askUserTimeoutMs: validatePositiveInt(Number(optional("COPILOT_ASK_USER_TIMEOUT_MS", "300000")), "COPILOT_ASK_USER_TIMEOUT_MS"),
       idleTimeoutMs: validatePositiveInt(Number(optional("COPILOT_IDLE_TIMEOUT_MS", "8000")), "COPILOT_IDLE_TIMEOUT_MS"),
+      instructions: optional("COPILOT_INSTRUCTIONS", ""),
+      stalePtyMs: validatePositiveInt(Number(optional("COPILOT_STALE_PTY_MS", "3600000")), "COPILOT_STALE_PTY_MS"), // 1 hour default
     },
     engine: (optional("DEFAULT_ENGINE", "codex") as "codex" | "copilot"),
     session: {

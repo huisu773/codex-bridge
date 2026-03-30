@@ -12,10 +12,20 @@ interface CodexStats {
   totalDurationMs: number;
 }
 
+interface CopilotStats {
+  total: number;
+  success: number;
+  failed: number;
+  timedOut: number;
+  totalDurationMs: number;
+  totalAskUserRounds: number;
+}
+
 const state = {
   telegram: "disconnected" as string,
   feishu: "disconnected" as string,
   codex: { total: 0, success: 0, failed: 0, timedOut: 0, totalDurationMs: 0 } as CodexStats,
+  copilot: { total: 0, success: 0, failed: 0, timedOut: 0, totalDurationMs: 0, totalAskUserRounds: 0 } as CopilotStats,
 };
 
 export function setPlatformStatus(platform: "telegram" | "feishu", status: string): void {
@@ -30,6 +40,15 @@ export function recordCodexExecution(success: boolean, durationMs: number, timed
   state.codex.totalDurationMs += durationMs;
 }
 
+export function recordCopilotExecution(success: boolean, durationMs: number, timedOut: boolean, askUserRounds: number): void {
+  state.copilot.total++;
+  if (success) state.copilot.success++;
+  else state.copilot.failed++;
+  if (timedOut) state.copilot.timedOut++;
+  state.copilot.totalDurationMs += durationMs;
+  state.copilot.totalAskUserRounds += askUserRounds;
+}
+
 export function getServiceMetrics(activeProcesses: number) {
   const mem = process.memoryUsage();
   return {
@@ -39,6 +58,12 @@ export function getServiceMetrics(activeProcesses: number) {
       ...state.codex,
       avgDurationMs: state.codex.total
         ? Math.round(state.codex.totalDurationMs / state.codex.total)
+        : 0,
+    },
+    copilot: {
+      ...state.copilot,
+      avgDurationMs: state.copilot.total
+        ? Math.round(state.copilot.totalDurationMs / state.copilot.total)
         : 0,
     },
     memory: {
