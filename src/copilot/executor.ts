@@ -9,7 +9,7 @@
  * Multi-turn conversations use `--resume=<sessionId>`.
  */
 
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -81,15 +81,18 @@ setInterval(() => {
 }, 60_000);
 
 // ─── Config dir setup ──────────────────────────────────────────────
+// Use a STABLE shared config dir so --resume can find previous session data.
+// The instructions file is always (re-)written to keep it up to date.
 
-function setupSessionConfigDir(): string {
-  const dir = join(
-    config.copilot.configDir,
-    `session-${randomUUID().slice(0, 8)}`,
-  );
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "copilot-instructions.md"), getInstructions());
-  return dir;
+let sharedConfigDir: string | undefined;
+
+function getOrCreateConfigDir(): string {
+  if (!sharedConfigDir) {
+    sharedConfigDir = config.copilot.configDir;
+  }
+  mkdirSync(sharedConfigDir, { recursive: true });
+  writeFileSync(join(sharedConfigDir, "copilot-instructions.md"), getInstructions());
+  return sharedConfigDir;
 }
 
 // ─── Directory snapshot for file detection ─────────────────────────
@@ -205,7 +208,7 @@ async function _executeCopilotOnce(
   // Snapshot working directory BEFORE execution for file detection
   const beforeSnap = await snapshotDir(workDir);
 
-  const sessionConfigDir = setupSessionConfigDir();
+  const configDir = getOrCreateConfigDir();
 
   const args = [
     "-p", opts.prompt,
@@ -213,7 +216,7 @@ async function _executeCopilotOnce(
     "--allow-all",
     "--autopilot",
     "--model", model,
-    "--config-dir", sessionConfigDir,
+    "--config-dir", configDir,
     "--no-color",
   ];
 
@@ -252,12 +255,6 @@ async function _executeCopilotOnce(
 
       try {
         proc.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-
-      try {
-        rmSync(sessionConfigDir, { recursive: true, force: true });
       } catch {
         /* ignore */
       }
