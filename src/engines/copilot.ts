@@ -283,4 +283,16 @@ export const copilotEngine: EngineExecutor = {
   getRunningCount(): number {
     return runningProcs.size;
   },
+
+  listModels() {
+    return [
+      { id: "claude-sonnet-4", description: "Claude Sonnet 4 — balanced", recommended: true },
+      { id: "claude-sonnet-4.5", description: "Claude Sonnet 4.5" },
+      { id: "gpt-4.1", description: "GPT-4.1" },
+      { id: "gpt-5.1", description: "GPT-5.1" },
+      { id: "o4-mini", description: "O4 Mini — fast reasoning" },
+      { id: "claude-haiku-4.5", description: "Claude Haiku 4.5 — fast & light" },
+      { id: "gemini-2.5-pro", description: "Gemini 2.5 Pro" },
+    ];
+  },
 };

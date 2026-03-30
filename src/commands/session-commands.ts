@@ -99,22 +99,34 @@ export function registerSessionCommands(): void {
   registerCommand({
     name: "model",
     aliases: ["models", "m"],
-    description: "View or switch the Codex model",
-    usage: "/model [model_name]",
+    description: "View or switch the model, list available models",
+    usage: "/model [model_name]  |  /models",
     execute: async (msg, args, sendReply) => {
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
+      const chatKey = `${msg.platform}:${msg.chatId}`;
+      const engineName = getEngine(chatKey);
+      const executor = getExecutor(engineName);
+
       if (!args) {
+        const models = executor.listModels();
+        const lines = models.map((m) => {
+          const marker = m.id === session.model ? " ✅" : "";
+          const rec = m.recommended ? " ⭐" : "";
+          const desc = m.description ? ` — ${m.description}` : "";
+          return `  • \`${m.id}\`${desc}${rec}${marker}`;
+        });
         await sendReply(
-          `🤖 Current model: ${session.model}\n\n` +
-            `To switch: /model <name>\n` +
-            `Example: /model o3\n` +
-            `Example: /model gpt-5.3-codex`,
+          `🤖 Current model: \`${session.model}\`\n` +
+            `🔧 Engine: ${executor.name}\n\n` +
+            `📋 Available models:\n${lines.join("\n")}\n\n` +
+            `To switch: \`/model <name>\`\n` +
+            `Example: \`/model ${models.find((m) => m.recommended)?.id || models[0]?.id}\``,
         );
         return;
       }
       const newModel = args.trim();
       updateSessionModel(session, newModel);
-      await sendReply(`✅ Model switched to: ${newModel}`);
+      await sendReply(`✅ Model switched to: \`${newModel}\``);
     },
   });
 

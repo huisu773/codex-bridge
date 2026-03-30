@@ -43,4 +43,13 @@ export interface EngineExecutor {
   execute(opts: EngineExecOptions): Promise<EngineExecResult>;
   cancelAll(): number;
   getRunningCount(): number;
+  /** Return a curated list of known models for this engine. */
+  listModels(): EngineModelInfo[];
+}
+
+/** Model metadata returned by listModels(). */
+export interface EngineModelInfo {
+  id: string;
+  description?: string;
+  recommended?: boolean;
 }

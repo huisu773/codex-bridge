@@ -233,4 +233,15 @@ export const codexEngine: EngineExecutor = {
   getRunningCount(): number {
     return runningProcesses.size;
   },
+
+  listModels() {
+    return [
+      { id: "gpt-5.3-codex", description: "GPT-5.3 Codex — latest coding model", recommended: true },
+      { id: "gpt-5.2-codex", description: "GPT-5.2 Codex" },
+      { id: "gpt-5.1-codex", description: "GPT-5.1 Codex" },
+      { id: "o4-mini", description: "O4 Mini — fast reasoning" },
+      { id: "o3", description: "O3 — reasoning model" },
+      { id: "gpt-4.1", description: "GPT-4.1" },
+    ];
+  },
 };
