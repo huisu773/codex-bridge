@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { nowISO } from "../utils/helpers.js";
+import { restoreEngine } from "../copilot/engine-state.js";
 import type { Session, ConversationEntry, FileRecord } from "../session/types.js";
 
 // In-memory session index: chatId → session
@@ -158,6 +159,24 @@ export function updateCodexSessionId(
   codexSessionId: string,
 ): void {
   session.codexSessionId = codexSessionId;
+  session.updatedAt = nowISO();
+  saveMeta(session);
+}
+
+export function updateSessionEngine(
+  session: Session,
+  engine: "codex" | "copilot",
+): void {
+  session.engine = engine;
+  session.updatedAt = nowISO();
+  saveMeta(session);
+}
+
+export function updateCopilotSessionId(
+  session: Session,
+  copilotSessionId: string,
+): void {
+  session.copilotSessionId = copilotSessionId;
   session.updatedAt = nowISO();
   saveMeta(session);
 }
@@ -372,6 +391,10 @@ export function loadSessionsFromDisk(): void {
   const sessions = listAllSessions();
   for (const s of sessions) {
     activeSessions.set(chatKey(s.platform, s.chatId), s);
+    // Restore per-chat engine override from persisted session
+    if (s.engine) {
+      restoreEngine(chatKey(s.platform, s.chatId), s.engine);
+    }
   }
   logger.info({ count: sessions.length, dir: config.session.dir }, "Loaded sessions from disk");
 }

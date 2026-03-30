@@ -1,5 +1,5 @@
 import { registerCommand } from "./registry.js";
-import { getOrCreateSession, updateSessionWorkingDir } from "../core/session-manager.js";
+import { getOrCreateSession, updateSessionWorkingDir, updateSessionEngine } from "../core/session-manager.js";
 import { nowISO } from "../utils/helpers.js";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -115,6 +115,9 @@ export function registerCustomCommands(): void {
       }
 
       setEngine(chatKey, engine as EngineType);
+      // Persist engine choice to session so it survives restarts
+      const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
+      updateSessionEngine(session, engine as "codex" | "copilot");
       const modelInfo = engine === "copilot"
         ? `Model: ${config.copilot.model}`
         : `Model: ${config.codex.model}`;

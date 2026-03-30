@@ -8,6 +8,8 @@ export interface Session {
   isCustomWorkingDir: boolean; // true when user explicitly set via /cd
   sessionDir: string;
   codexSessionId?: string;
+  copilotSessionId?: string;  // Copilot session context ID (future multi-turn)
+  engine?: "codex" | "copilot"; // per-chat engine override, persisted across restarts
   createdAt: string;
   updatedAt: string;
   messageCount: number;

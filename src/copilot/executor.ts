@@ -13,6 +13,8 @@ import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { stripAnsi } from "./ansi-utils.js";
@@ -28,6 +30,8 @@ import type {
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pty: typeof import("node-pty") = require("node-pty");
+
+const execFileAsync = promisify(execFile);
 
 // ─── Forced ask_user instruction ───────────────────────────────────
 
@@ -91,6 +95,53 @@ function setupSessionConfigDir(): string {
   return dir;
 }
 
+// ─── Directory snapshot for file detection ─────────────────────────
+
+async function snapshotDir(dir: string): Promise<Map<string, number>> {
+  const snap = new Map<string, number>();
+  try {
+    const { stdout } = await execFileAsync("find", [
+      dir,
+      "-maxdepth", "3",
+      "-type", "f",
+      "-not", "-path", "*/node_modules/*",
+      "-not", "-path", "*/.git/*",
+      "-not", "-path", "*/logs/*",
+      "-not", "-name", "*.log",
+      "-not", "-name", "*.sqlite*",
+      "-not", "-name", "*.lock",
+      "-not", "-name", "package-lock.json",
+      "-not", "-path", "*/dist/*",
+      "-not", "-path", "*/.codex/*",
+      "-not", "-path", "*/sessions/*",
+      "-printf", "%T@ %p\\n",
+    ], { encoding: "utf-8", timeout: 5000, maxBuffer: 5 * 1024 * 1024 });
+    const lines = stdout.trim().split("\n").filter(Boolean).slice(0, 5000);
+    for (const line of lines) {
+      const spaceIdx = line.indexOf(" ");
+      if (spaceIdx > 0) {
+        const mtime = parseFloat(line.slice(0, spaceIdx));
+        const path = line.slice(spaceIdx + 1);
+        snap.set(path, mtime);
+      }
+    }
+  } catch {
+    // Ignore snapshot errors
+  }
+  return snap;
+}
+
+function diffSnapshots(before: Map<string, number>, after: Map<string, number>): string[] {
+  const newFiles: string[] = [];
+  for (const [path, mtime] of after) {
+    const prevMtime = before.get(path);
+    if (prevMtime === undefined || mtime > prevMtime) {
+      newFiles.push(path);
+    }
+  }
+  return newFiles;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
@@ -108,6 +159,9 @@ async function simulateChoice(
   await sleep(300);
   term.write("\r"); // Enter
 }
+
+// Max auto-retries when ask_user times out before aborting
+const ASK_USER_AUTO_RETRY_LIMIT = 2;
 
 // ─── Main executor ─────────────────────────────────────────────────
 
@@ -134,6 +188,9 @@ export async function executeCopilot(
     };
   }
 
+  // Snapshot working directory BEFORE execution for file detection
+  const beforeSnap = await snapshotDir(workDir);
+
   const sessionConfigDir = setupSessionConfigDir();
 
   const args = [
@@ -156,6 +213,7 @@ export async function executeCopilot(
     let rawOutput = "";
     let lastDataTime = Date.now();
     let askUserRounds = 0;
+    let askUserAutoRetries = 0;
     const textSegments: string[] = [];
     let exited = false;
     let exitCode = 0;
@@ -171,7 +229,7 @@ export async function executeCopilot(
 
     runningPtys.set(execId, { term, startedAt: Date.now() });
 
-    const finish = (result: CopilotExecResult) => {
+    const finish = async (result: CopilotExecResult) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(overallTimer);
@@ -186,6 +244,15 @@ export async function executeCopilot(
       } catch {
         /* ignore */
       }
+
+      // Detect new/modified files by diffing snapshots
+      try {
+        const afterSnap = await snapshotDir(workDir);
+        result.newFiles = diffSnapshots(beforeSnap, afterSnap);
+      } catch {
+        // Keep empty if snapshot fails
+      }
+
       logger.info(
         {
           execId,
@@ -193,6 +260,7 @@ export async function executeCopilot(
           durationMs: result.durationMs,
           askUserRounds: result.askUserRounds,
           outputLen: result.output.length,
+          newFileCount: result.newFiles.length,
         },
         "Copilot execution completed",
       );
@@ -304,17 +372,37 @@ export async function executeCopilot(
               askUserRounds++;
               rawOutput = ""; // Clear buffer for next segment
 
-              if (
-                response.type === "timeout" ||
-                response.type === "cancel"
-              ) {
-                // ESC out of ask_user and end
+              if (response.type === "timeout") {
+                // Auto-retry: select first option instead of aborting
+                if (askUserAutoRetries < ASK_USER_AUTO_RETRY_LIMIT) {
+                  askUserAutoRetries++;
+                  logger.info(
+                    { execId, retry: askUserAutoRetries },
+                    "ask_user timed out, auto-selecting first option (retry)",
+                  );
+                  await simulateChoice(term, 0);
+                  await waitForIdle(idleMs);
+                  continue;
+                }
+                // Exhausted retries — ESC and end
+                logger.warn({ execId }, "ask_user retries exhausted, aborting");
                 term.write("\x1b");
                 await sleep(300);
                 term.write("\x1b");
                 await sleep(500);
                 break;
               }
+
+              if (response.type === "cancel") {
+                term.write("\x1b");
+                await sleep(300);
+                term.write("\x1b");
+                await sleep(500);
+                break;
+              }
+
+              // Reset auto-retry counter on successful user response
+              askUserAutoRetries = 0;
 
               if (
                 response.type === "choice" &&
@@ -353,15 +441,25 @@ export async function executeCopilot(
         }
 
         const output = textSegments.join("\n\n").trim() || "(no output)";
+        const durationMs = Date.now() - startTime;
+
+        // Estimate token usage from output (rough heuristic: ~4 chars per token)
+        const estimatedOutputTokens = Math.ceil(output.length / 4);
+        const estimatedInputTokens = Math.ceil(opts.prompt.length / 4);
 
         finish({
           success: true,
           output,
           exitCode: exited ? exitCode : 0,
-          durationMs: Date.now() - startTime,
+          durationMs,
           timedOut: false,
-          newFiles: [],
+          newFiles: [],  // Will be populated by finish() via snapshot diff
           askUserRounds,
+          usage: {
+            inputTokens: estimatedInputTokens,
+            outputTokens: estimatedOutputTokens,
+            cachedTokens: 0,
+          },
         });
       } catch (err) {
         logger.error({ err, execId }, "Copilot execution error");

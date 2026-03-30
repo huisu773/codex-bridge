@@ -30,6 +30,7 @@ export {
   getEngine,
   setEngine,
   getEngineLabel,
+  restoreEngine,
   type EngineType,
 } from "./engine-state.js";
 

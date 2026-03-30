@@ -184,9 +184,27 @@ export function registerNativeCommands(): void {
     execute: async (msg, _args, sendReply) => {
       const session = getSession(msg.platform, msg.chatId);
       const running = getRunningTaskCount();
+      const copilotRunning = getRunningCopilotCount();
       const allSessions = listAllSessions();
       const account = getCodexAccountInfo();
       const metrics = getServiceMetrics(running);
+      const chatKey = `${msg.platform}:${msg.chatId}`;
+      const engine = getEngine(chatKey);
+
+      const sessionInfo = session
+        ? [
+            `ID: ${session.id}`,
+            `Engine: ${engine}${session.engine ? "" : " (default)"}`,
+            `Model: ${session.model}`,
+            `Messages: ${session.messageCount}`,
+            `Workdir: ${session.workingDir}`,
+            `📁 Session: ${session.sessionDir || "N/A"}`,
+            engine === "copilot"
+              ? `🔗 Copilot session: ${session.copilotSessionId || "stateless"}`
+              : `🔗 Codex thread: ${session.codexSessionId || "none"}`,
+            `📊 Tokens used: ${session.stats.totalTokensUsed}`,
+          ].join("\n")
+        : "No active session (send a message or use /new to start)";
 
       const lines = [
         "📊 **Status**",
@@ -197,17 +215,16 @@ export function registerNativeCommands(): void {
         metrics.codex.total > 0
           ? `Codex: ${metrics.codex.total} runs (${metrics.codex.success} ok, ${metrics.codex.failed} fail), avg ${metrics.codex.avgDurationMs}ms`
           : "Codex: no runs yet",
+        `Running: ${running} codex, ${copilotRunning} copilot`,
         "",
         "— Session —",
-        session
-          ? `ID: ${session.id}\nModel: ${session.model}\nMessages: ${session.messageCount}\nWorkdir: ${session.workingDir}\n📁 Session: ${session.sessionDir || "N/A"}\n🔗 Codex thread: ${session.codexSessionId || "none"}`
-          : "No active session (send a message or use /new to start)",
+        sessionInfo,
         "",
         "— Account —",
         `Plan: ${account.plan || "unknown"}`,
         account.subscriptionStatus ? `Sub: ${account.subscriptionStatus}` : "",
         "",
-        `Sessions: ${allSessions.length} | Running tasks: ${running}`,
+        `Sessions: ${allSessions.length}`,
       ].filter(Boolean);
 
       await sendReply(lines.join("\n"));
@@ -242,14 +259,24 @@ export function registerNativeCommands(): void {
     usage: "/compact",
     execute: async (msg, _args, sendReply) => {
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
+      const chatKey = `${msg.platform}:${msg.chatId}`;
+      const engine = getEngine(chatKey);
       await sendReply("🗜️ Compacting session context...");
 
-      const result = await executeCodex({
-        prompt: "Please provide a very brief summary of our conversation so far and the current state of work. Be concise.",
-        model: session.model,
-        workingDir: session.workingDir,
-        resumeSessionId: session.codexSessionId,
-      });
+      const compactPrompt = "Please provide a very brief summary of our conversation so far and the current state of work. Be concise.";
+
+      const result = engine === "copilot"
+        ? await executeCopilot({
+            prompt: compactPrompt,
+            model: session.model,
+            workingDir: session.workingDir,
+          })
+        : await executeCodex({
+            prompt: compactPrompt,
+            model: session.model,
+            workingDir: session.workingDir,
+            resumeSessionId: session.codexSessionId,
+          });
 
       if (result.success) {
         appendConversation(session, {
@@ -281,7 +308,8 @@ export function registerNativeCommands(): void {
         ...sessions.map(
           (s) => {
             const stats = s.stats || { totalGeneratedFiles: 0, totalReceivedFiles: 0, totalTokensUsed: 0 };
-            return `• ${s.id} | ${s.platform} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  🔗 thread: ${s.codexSessionId || "none"}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received\n  created: ${s.createdAt}`;
+            const engineLabel = s.engine || "default";
+            return `• ${s.id} | ${s.platform} | engine: ${engineLabel} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  🔗 codex: ${s.codexSessionId || "none"} | copilot: ${s.copilotSessionId || "none"}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received | tokens: ${stats.totalTokensUsed}\n  created: ${s.createdAt}`;
           },
         ),
       ];
@@ -326,8 +354,13 @@ export function registerNativeCommands(): void {
     execute: async (msg, _args, sendReply) => {
       const session = getSession(msg.platform, msg.chatId);
       if (session) {
+        const chatKey = `${msg.platform}:${msg.chatId}`;
+        const engine = getEngine(chatKey);
+        const threadInfo = engine === "copilot"
+          ? `🔗 Engine: copilot\n🔗 Copilot session: ${session.copilotSessionId || "none (stateless)"}`
+          : `🔗 Engine: codex\n🔗 Codex thread: ${session.codexSessionId || "none (will be created on next message)"}`;
         await sendReply(
-          `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}\n🔗 Codex thread: ${session.codexSessionId || "none (will be created on next message)"}`,
+          `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}\n${threadInfo}`,
         );
       } else {
         await sendReply(
@@ -457,7 +490,7 @@ export function registerNativeCommands(): void {
             updateCodexSessionId(session, result.threadId);
           }
 
-          // Update token usage (codex only)
+          // Update token usage (both engines)
           if ("usage" in result && result.usage) {
             session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
           }
