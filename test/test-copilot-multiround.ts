@@ -15,7 +15,8 @@ process.env.DEFAULT_ENGINE = "copilot";
 process.env.COPILOT_MODEL = "claude-haiku-4.5";
 process.env.LOG_LEVEL = "info";
 
-import { executeCopilot } from "../src/copilot/executor.js";
+import { copilotEngine } from "../src/engines/copilot.js";
+const executeCopilot = copilotEngine.execute.bind(copilotEngine);
 
 async function main() {
   console.log("╔══════════════════════════════════════════════╗");

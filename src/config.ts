@@ -52,10 +52,6 @@ export interface Config {
     localBin: string;
     language: string;
   };
-  limits: {
-    fiveHourMaxRequests: number;
-    weeklyMaxRequests: number;
-  };
   log: {
     level: string;
     file: string;
@@ -161,10 +157,6 @@ export function loadConfig(): Config {
       endpoint: optional("STT_ENDPOINT", ""),
       localBin: optional("STT_LOCAL_BIN", "whisper"),
       language: optional("STT_LANGUAGE", ""),
-    },
-    limits: {
-      fiveHourMaxRequests: validatePositiveInt(Number(optional("FIVE_HOUR_MAX_REQUESTS", "50")), "FIVE_HOUR_MAX_REQUESTS"),
-      weeklyMaxRequests: validatePositiveInt(Number(optional("WEEKLY_MAX_REQUESTS", "1000")), "WEEKLY_MAX_REQUESTS"),
     },
     log: {
       level: optional("LOG_LEVEL", "info"),

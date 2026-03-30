@@ -18,7 +18,8 @@ process.env.DEFAULT_ENGINE = "copilot";
 process.env.COPILOT_MODEL = "claude-haiku-4.5";
 process.env.LOG_LEVEL = "debug";
 
-import { executeCopilot } from "../src/copilot/executor.js";
+import { copilotEngine } from "../src/engines/copilot.js";
+const executeCopilot = copilotEngine.execute.bind(copilotEngine);
 
 const passed: string[] = [];
 const failed: string[] = [];
