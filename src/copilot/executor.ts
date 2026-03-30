@@ -66,7 +66,7 @@ const runningProcs = new Map<string, RunningProcess>();
 // Periodic cleanup of stale processes (configurable threshold)
 setInterval(() => {
   const now = Date.now();
-  const staleMs = config.copilot.stalePtyMs;
+  const staleMs = config.copilot.staleProcessMs;
   for (const [id, entry] of runningProcs) {
     if (now - entry.startedAt > staleMs) {
       logger.warn({ execId: id, elapsedMin: Math.round((now - entry.startedAt) / 60_000) }, "Cleaning up stale Copilot process");
@@ -213,12 +213,17 @@ async function _executeCopilotOnce(
   const args = [
     "-p", opts.prompt,
     "--output-format", "json",
-    "--allow-all",
-    "--autopilot",
     "--model", model,
     "--config-dir", configDir,
     "--no-color",
   ];
+
+  if (config.copilot.allowAll) {
+    args.push("--allow-all");
+  }
+  if (config.copilot.autopilot) {
+    args.push("--autopilot");
+  }
 
   // Multi-turn: pass --resume to continue a previous session
   if (opts.resumeSessionId) {
