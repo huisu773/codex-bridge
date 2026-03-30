@@ -286,13 +286,27 @@ export const copilotEngine: EngineExecutor = {
 
   listModels() {
     return [
-      { id: "claude-sonnet-4", description: "Claude Sonnet 4 — balanced", recommended: true },
+      { id: "claude-sonnet-4.6", description: "Claude Sonnet 4.6 — latest balanced", recommended: true },
       { id: "claude-sonnet-4.5", description: "Claude Sonnet 4.5" },
-      { id: "gpt-4.1", description: "GPT-4.1" },
-      { id: "gpt-5.1", description: "GPT-5.1" },
-      { id: "o4-mini", description: "O4 Mini — fast reasoning" },
+      { id: "claude-sonnet-4", description: "Claude Sonnet 4" },
+      { id: "claude-opus-4.6", description: "Claude Opus 4.6 — deep reasoning" },
+      { id: "claude-opus-4.5", description: "Claude Opus 4.5" },
       { id: "claude-haiku-4.5", description: "Claude Haiku 4.5 — fast & light" },
+      { id: "gpt-5.4", description: "GPT-5.4" },
+      { id: "gpt-5.4-mini", description: "GPT-5.4 Mini" },
+      { id: "gpt-5.3-codex", description: "GPT-5.3 Codex" },
+      { id: "gpt-5.2-codex", description: "GPT-5.2 Codex" },
+      { id: "gpt-5.2", description: "GPT-5.2" },
+      { id: "gpt-5.1-codex-max", description: "GPT-5.1 Codex Max" },
+      { id: "gpt-5.1-codex", description: "GPT-5.1 Codex" },
+      { id: "gpt-5.1-codex-mini", description: "GPT-5.1 Codex Mini" },
+      { id: "gpt-5.1", description: "GPT-5.1" },
+      { id: "gpt-5-mini", description: "GPT-5 Mini" },
+      { id: "o4-mini", description: "O4 Mini — fast reasoning" },
+      { id: "gpt-4.1", description: "GPT-4.1" },
       { id: "gemini-2.5-pro", description: "Gemini 2.5 Pro" },
+      { id: "gemini-3-flash", description: "Gemini 3 Flash (preview)" },
+      { id: "gemini-3.1-pro", description: "Gemini 3.1 Pro (preview)" },
     ];
   },
 };

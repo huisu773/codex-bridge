@@ -122,7 +122,7 @@ All configuration is via environment variables in `.env`:
 |---------|-------------|
 | `/new` | Start a new session |
 | `/status` | Show current session & account status |
-| `/model [name]` | View or switch the model |
+| `/model [name]` | View or switch the model (no args = list available models) |
 | `/compact` | Compress session context |
 | `/sessions` | List all sessions |
 | `/resume` | View current session info |
@@ -145,7 +145,40 @@ Send any message without a `/` prefix to chat with the active engine. The engine
 
 ### Engine Switching
 
-Use `/engine codex` or `/engine copilot` to switch the backend per chat. The default is set by the `ENGINE` environment variable (default: `copilot`). Engine selection persists across service restarts.
+Use `/engine codex` or `/engine copilot` to switch the backend per chat. The default is set by the `DEFAULT_ENGINE` environment variable (default: `codex`). Engine selection persists across service restarts.
+
+### Supported Models
+
+Use `/model` (no arguments) to see all available models for the current engine. Use `/model <name>` to switch.
+
+**Codex Engine (OpenAI):**
+
+| Model | Description |
+|-------|-------------|
+| `gpt-5.4` ⭐ | GPT-5.4 — flagship reasoning & coding |
+| `gpt-5.4-mini` | GPT-5.4 Mini — fast & lightweight |
+| `gpt-5.3-codex` | GPT-5.3 Codex — complex projects |
+| `gpt-5.2-codex` | GPT-5.2 Codex — agentic coding |
+| `gpt-5.1-codex-max` | GPT-5.1 Codex Max — project-scale tasks |
+| `gpt-5.1-codex` | GPT-5.1 Codex |
+| `o4-mini` | O4 Mini — fast reasoning |
+| `o3` | O3 — reasoning model |
+| `codex-mini-latest` | Codex Mini — low-latency |
+| `gpt-4.1` | GPT-4.1 |
+
+**Copilot Engine (multi-provider):**
+
+| Model | Description |
+|-------|-------------|
+| `claude-sonnet-4.6` ⭐ | Claude Sonnet 4.6 — latest balanced |
+| `claude-opus-4.6` | Claude Opus 4.6 — deep reasoning |
+| `claude-haiku-4.5` | Claude Haiku 4.5 — fast & light |
+| `gpt-5.4` | GPT-5.4 |
+| `gpt-5.3-codex` | GPT-5.3 Codex |
+| `gemini-2.5-pro` | Gemini 2.5 Pro |
+| `gemini-3-flash` | Gemini 3 Flash (preview) |
+
+> Models marked ⭐ are recommended defaults. Available models may vary by account plan.
 
 ### File Workflow
 

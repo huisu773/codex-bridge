@@ -122,7 +122,7 @@ npm start
 |------|------|
 | `/new` | 创建新会话 |
 | `/status` | 查看当前会话和系统状态 |
-| `/model [name]` | 查看/切换模型 |
+| `/model [name]` | 查看/切换模型（无参数时列出所有可用模型） |
 | `/compact` | 压缩会话上下文 |
 | `/sessions` | 列出所有会话 |
 | `/resume` | 查看当前会话信息 |
@@ -145,7 +145,40 @@ npm start
 
 ### 引擎切换
 
-使用 `/engine codex` 或 `/engine copilot` 按聊天切换后端引擎。默认引擎通过 `ENGINE` 环境变量设置（默认：`copilot`）。引擎选择在服务重启后保持。
+使用 `/engine codex` 或 `/engine copilot` 按聊天切换后端引擎。默认引擎通过 `DEFAULT_ENGINE` 环境变量设置（默认：`codex`）。引擎选择在服务重启后保持。
+
+### 支持的模型
+
+使用 `/model`（无参数）查看当前引擎的所有可用模型。使用 `/model <名称>` 进行切换。
+
+**Codex 引擎（OpenAI）：**
+
+| 模型 | 说明 |
+|------|------|
+| `gpt-5.4` ⭐ | GPT-5.4 — 旗舰推理与编程 |
+| `gpt-5.4-mini` | GPT-5.4 Mini — 快速轻量 |
+| `gpt-5.3-codex` | GPT-5.3 Codex — 复杂项目 |
+| `gpt-5.2-codex` | GPT-5.2 Codex — 智能体编程 |
+| `gpt-5.1-codex-max` | GPT-5.1 Codex Max — 项目级任务 |
+| `gpt-5.1-codex` | GPT-5.1 Codex |
+| `o4-mini` | O4 Mini — 快速推理 |
+| `o3` | O3 — 推理模型 |
+| `codex-mini-latest` | Codex Mini — 低延迟 |
+| `gpt-4.1` | GPT-4.1 |
+
+**Copilot 引擎（多提供商）：**
+
+| 模型 | 说明 |
+|------|------|
+| `claude-sonnet-4.6` ⭐ | Claude Sonnet 4.6 — 最新均衡 |
+| `claude-opus-4.6` | Claude Opus 4.6 — 深度推理 |
+| `claude-haiku-4.5` | Claude Haiku 4.5 — 快速轻量 |
+| `gpt-5.4` | GPT-5.4 |
+| `gpt-5.3-codex` | GPT-5.3 Codex |
+| `gemini-2.5-pro` | Gemini 2.5 Pro |
+| `gemini-3-flash` | Gemini 3 Flash（预览） |
+
+> ⭐ 标记为推荐默认模型。可用模型可能因账户计划而异。
 
 ### 文件工作流
 
