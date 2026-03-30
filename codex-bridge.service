@@ -21,7 +21,7 @@ TimeoutStartSec=30
 TimeoutStopSec=15
 
 # Resource limits
-MemoryMax=768M
+MemoryMax=1536M
 LimitNOFILE=65536
 LimitNPROC=1024
 

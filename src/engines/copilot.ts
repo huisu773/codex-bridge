@@ -191,13 +191,19 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
       let event: { type: string; data?: Record<string, unknown>; sessionId?: string; exitCode?: number; usage?: Record<string, unknown> };
       try { event = JSON.parse(line); } catch { return; }
 
+      const fullText = () => {
+        const parts = [...textSegments];
+        if (currentMessage && !parts.includes(currentMessage)) parts.push(currentMessage);
+        return parts.join("\n\n");
+      };
+
       switch (event.type) {
         case "assistant.message_delta": {
           const delta = (event.data as { deltaContent?: string })?.deltaContent;
           if (delta) {
             currentMessage += delta;
             opts.onProgress?.(delta);
-            opts.onTextEvent?.(delta, currentMessage);
+            opts.onTextEvent?.(delta, fullText());
           }
           break;
         }
@@ -206,8 +212,16 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
           if (content) {
             currentMessage = content;
             textSegments.push(content);
-            opts.onTextEvent?.(content, textSegments.join("\n\n"));
+            opts.onTextEvent?.(content, fullText());
           }
+          break;
+        }
+        case "tool.execution_start":
+          logger.debug({ execId, tool: (event.data as { toolName?: string })?.toolName }, "Copilot tool started");
+          break;
+        case "tool.execution_complete": {
+          const data = event.data as { toolName?: string; result?: string; success?: boolean };
+          logger.debug({ execId, tool: data?.toolName, success: data?.success }, "Copilot tool completed");
           break;
         }
         case "assistant.tool_call":
@@ -224,6 +238,7 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
         case "session.start": case "session.model_change": case "session.mcp_server_status_changed":
         case "session.mcp_servers_loaded": case "session.tools_updated": case "user.message":
         case "assistant.reasoning_delta": case "assistant.reasoning": case "assistant.turn_start":
+        case "session.background_tasks_changed":
           break;
         default:
           logger.debug({ execId, type: event.type }, "Unhandled Copilot event");
