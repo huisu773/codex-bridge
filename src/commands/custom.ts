@@ -5,7 +5,7 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { config } from "../config.js";
-import { getEngine, setEngine, getEngineLabel, type EngineType } from "../copilot/index.js";
+import { getEngine, setEngine, getEngineLabel, type EngineName } from "../engines/index.js";
 
 export function registerCustomCommands(): void {
   // /exec — Execute a shell command directly
@@ -114,7 +114,7 @@ export function registerCustomCommands(): void {
         return;
       }
 
-      setEngine(chatKey, engine as EngineType);
+      setEngine(chatKey, engine as EngineName);
       // Persist engine choice to session so it survives restarts
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
       updateSessionEngine(session, engine as "codex" | "copilot");

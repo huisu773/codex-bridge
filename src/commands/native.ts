@@ -15,18 +15,11 @@ import {
   recordFileSent,
 } from "../core/session-manager.js";
 import {
-  executeCodex,
-  cancelAllTasks,
-  getRunningTaskCount,
-} from "../core/codex-executor.js";
-import {
-  executeCopilot,
-  cancelAllCopilotTasks,
-  getRunningCopilotCount,
-  hasPendingAskUser,
-  resolveUserResponse,
   getEngine,
-} from "../copilot/index.js";
+  getExecutor,
+  cancelAllEngines,
+  getTotalRunningCount,
+} from "../engines/index.js";
 import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
 import { readFileSync, existsSync, statSync } from "node:fs";
@@ -182,11 +175,10 @@ export function registerNativeCommands(): void {
     usage: "/status",
     execute: async (msg, _args, sendReply) => {
       const session = getSession(msg.platform, msg.chatId);
-      const running = getRunningTaskCount();
-      const copilotRunning = getRunningCopilotCount();
+      const totalRunning = getTotalRunningCount();
       const allSessions = listAllSessions();
       const account = getCodexAccountInfo();
-      const metrics = getServiceMetrics(running);
+      const metrics = getServiceMetrics(totalRunning);
       const chatKey = `${msg.platform}:${msg.chatId}`;
       const engine = getEngine(chatKey);
 
@@ -217,7 +209,7 @@ export function registerNativeCommands(): void {
         metrics.copilot.total > 0
           ? `Copilot: ${metrics.copilot.total} runs (${metrics.copilot.success} ok, ${metrics.copilot.failed} fail), avg ${metrics.copilot.avgDurationMs}ms, ${metrics.copilot.totalAskUserRounds} ask_user rounds`
           : "Copilot: no runs yet",
-        `Running: ${running} codex, ${copilotRunning} copilot`,
+        `Running: ${totalRunning} task(s)`,
         "",
         "— Session —",
         sessionInfo,
@@ -267,19 +259,17 @@ export function registerNativeCommands(): void {
 
       const compactPrompt = "Please provide a very brief summary of our conversation so far and the current state of work. Be concise.";
 
-      const result = engine === "copilot"
-        ? await executeCopilot({
-            prompt: compactPrompt,
-            model: session.model,
-            workingDir: session.workingDir,
-            resumeSessionId: session.copilotSessionId || undefined,
-          })
-        : await executeCodex({
-            prompt: compactPrompt,
-            model: session.model,
-            workingDir: session.workingDir,
-            resumeSessionId: session.codexSessionId,
-          });
+      const executor = getExecutor(engine);
+      const resumeSessionId = engine === "copilot"
+        ? session.copilotSessionId || undefined
+        : session.codexSessionId || undefined;
+
+      const result = await executor.execute({
+        prompt: compactPrompt,
+        model: session.model,
+        workingDir: session.workingDir,
+        resumeSessionId,
+      });
 
       if (result.success) {
         appendConversation(session, {
@@ -325,12 +315,11 @@ export function registerNativeCommands(): void {
     description: "Cancel all running tasks",
     usage: "/cancel",
     execute: async (_msg, _args, sendReply) => {
-      const codexCount = cancelAllTasks();
-      const copilotCount = cancelAllCopilotTasks();
-      const total = codexCount + copilotCount;
+      const { codex, copilot } = cancelAllEngines();
+      const total = codex + copilot;
       await sendReply(
         total > 0
-          ? `🛑 Cancelled ${total} running task(s) (codex: ${codexCount}, copilot: ${copilotCount}).`
+          ? `🛑 Cancelled ${total} running task(s).`
           : "ℹ️ No running tasks to cancel.",
       );
     },
@@ -382,12 +371,6 @@ export function registerNativeCommands(): void {
     execute: async (msg, _args, sendReply, sendFile) => {
       const chatKey = `${msg.platform}:${msg.chatId}`;
 
-      // Intercept ask_user responses BEFORE enqueueing (prevents deadlock)
-      if (hasPendingAskUser(chatKey)) {
-        resolveUserResponse(chatKey, msg.text);
-        return;
-      }
-
       // Enqueue task for this chat (serialize within chat, parallel across chats)
       await enqueueChatTask(chatKey, async () => {
         const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
@@ -406,83 +389,65 @@ export function registerNativeCommands(): void {
         let lastStreamUpdate = 0;
         const STREAM_THROTTLE_MS = msg.platform === "feishu" ? 1000 : 500;
 
-        // Start streaming if platform supports it
         if (msg.sendStreamStart) {
           try {
             streamMsgId = await msg.sendStreamStart("⏳ Processing...");
-          } catch {
-            // Streaming start failed, will fall back to normal reply
-          }
+          } catch { /* fall back to normal reply */ }
         }
 
-        // Heartbeat timer: send progress every 60s
+        // Heartbeat timer
         let heartbeatCount = 0;
         const heartbeatInterval = setInterval(async () => {
           heartbeatCount++;
-          const mins = heartbeatCount;
-          const text = `⏳ Still working... (${mins}m elapsed)`;
+          const text = `⏳ Still working... (${heartbeatCount}m elapsed)`;
           if (streamMsgId && msg.updateStream) {
-            try {
-              await msg.updateStream(streamMsgId, text);
-            } catch { /* ignore */ }
+            try { await msg.updateStream(streamMsgId, text); } catch { /* ignore */ }
           }
         }, 60_000);
 
         try {
           const engine = getEngine(chatKey);
+          const executor = getExecutor(engine);
 
-          // Route to the appropriate backend engine
-          const result = engine === "copilot"
-            ? await executeCopilot({
-                prompt,
-                model: session.model,
-                workingDir: session.workingDir,
-                resumeSessionId: session.copilotSessionId || undefined,
-                onTextEvent: (_newText, accumulated) => {
-                  if (streamMsgId && msg.updateStream) {
-                    const now = Date.now();
-                    if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
-                      lastStreamUpdate = now;
-                      msg.updateStream(streamMsgId, accumulated).catch(() => {});
-                    }
-                  }
-                },
-              })
-            : await executeCodex({
-                prompt,
-                model: session.model,
-                workingDir: session.workingDir,
-                images: imageFiles.length > 0 ? imageFiles : undefined,
-                resumeSessionId: session.codexSessionId,
-                onThreadStarted: (tid) => {
-                  // Persist threadId immediately so it survives crashes/restarts
-                  if (tid !== session.codexSessionId) {
-                    updateCodexSessionId(session, tid);
-                  }
-                },
-                onTextEvent: (_newText, accumulated) => {
-                  if (streamMsgId && msg.updateStream) {
-                    const now = Date.now();
-                    if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
-                      lastStreamUpdate = now;
-                      msg.updateStream(streamMsgId, accumulated).catch(() => {});
-                    }
-                  }
-                },
-              });
+          // Determine the resume session ID based on engine
+          const resumeSessionId = engine === "copilot"
+            ? session.copilotSessionId || undefined
+            : session.codexSessionId || undefined;
 
-          // Save codex thread ID for multi-turn (codex only)
-          if ("threadId" in result && result.threadId && result.threadId !== session.codexSessionId) {
-            updateCodexSessionId(session, result.threadId);
+          const result = await executor.execute({
+            prompt,
+            model: session.model,
+            workingDir: session.workingDir,
+            images: imageFiles.length > 0 ? imageFiles : undefined,
+            resumeSessionId,
+            onSessionStarted: (sid) => {
+              // Persist session ID immediately so it survives crashes
+              if (engine === "codex" && sid !== session.codexSessionId) {
+                updateCodexSessionId(session, sid);
+              }
+            },
+            onTextEvent: (_newText, accumulated) => {
+              if (streamMsgId && msg.updateStream) {
+                const now = Date.now();
+                if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
+                  lastStreamUpdate = now;
+                  msg.updateStream(streamMsgId, accumulated).catch(() => {});
+                }
+              }
+            },
+          });
+
+          // Save session ID for multi-turn resume
+          if (result.sessionId) {
+            if (engine === "copilot" && result.sessionId !== session.copilotSessionId) {
+              updateCopilotSessionId(session, result.sessionId);
+            } else if (engine === "codex" && result.sessionId !== session.codexSessionId) {
+              updateCodexSessionId(session, result.sessionId);
+            }
           }
 
-          // Save copilot session ID for multi-turn --resume
-          if ("sessionId" in result && result.sessionId && result.sessionId !== session.copilotSessionId) {
-            updateCopilotSessionId(session, result.sessionId);
-          }
-
-          // Update token usage (codex only — Copilot doesn't expose real token counts)
-          if ("usage" in result && result.usage && engine !== "copilot") {
+          // Update token usage (codex only)
+          if (result.usage) {
             session.stats.totalTokensUsed += (result.usage.inputTokens + result.usage.outputTokens);
           }
 
@@ -495,9 +460,7 @@ export function registerNativeCommands(): void {
               exitCode: result.exitCode,
               durationMs: result.durationMs,
               newFiles: result.newFiles,
-              ...("threadId" in result ? { threadId: result.threadId } : {}),
-              ...("sessionId" in result ? { copilotSessionId: result.sessionId } : {}),
-              ...("askUserRounds" in result ? { askUserRounds: result.askUserRounds } : {}),
+              sessionId: result.sessionId,
             },
           });
 

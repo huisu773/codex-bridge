@@ -4,7 +4,7 @@ import { config } from "../../config.js";
 import { logger } from "../../utils/logger.js";
 import { initFeishuClient, handleFeishuEvent } from "./handler.js";
 import { getServiceMetrics, setPlatformStatus } from "../../utils/metrics.js";
-import { getRunningTaskCount } from "../../core/codex-executor.js";
+import { getTotalRunningCount } from "../../engines/index.js";
 
 let wsClient: lark.WSClient | null = null;
 let server: ReturnType<typeof express.application.listen> | null = null;
@@ -27,7 +27,7 @@ export async function startFeishuBot(): Promise<void> {
   // Still start Express for health check
   const app = express();
   app.get("/health", (_req, res) => {
-    const metrics = getServiceMetrics(getRunningTaskCount());
+    const metrics = getServiceMetrics(getTotalRunningCount());
     res.json({
       status: "ok",
       service: "codex-bridge",

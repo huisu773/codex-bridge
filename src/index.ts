@@ -1,8 +1,7 @@
 import { config } from "./config.js";
 import { logger } from "./utils/logger.js";
 import { loadSessionsFromDisk, cleanExpiredSessions } from "./core/session-manager.js";
-import { cancelAllTasks } from "./core/codex-executor.js";
-import { cancelAllCopilotTasks, cancelAllPendingAskUser } from "./copilot/index.js";
+import { cancelAllEngines } from "./engines/index.js";
 import { registerNativeCommands } from "./commands/native.js";
 import { registerCustomCommands } from "./commands/custom.js";
 import { registerHelpCommand } from "./commands/help.js";
@@ -77,10 +76,9 @@ function shutdown(signal: string) {
   forceTimer.unref();
 
   try {
-    const cancelled = cancelAllTasks();
-    const copilotCancelled = cancelAllCopilotTasks();
-    cancelAllPendingAskUser();
-    if (cancelled + copilotCancelled > 0) logger.info({ cancelled, copilotCancelled }, "Cancelled running tasks");
+    const { codex, copilot } = cancelAllEngines();
+    const totalCancelled = codex + copilot;
+    if (totalCancelled > 0) logger.info({ codex, copilot }, "Cancelled running tasks");
     stopTelegramBot();
     stopFeishuBot();
   } catch (err) {
