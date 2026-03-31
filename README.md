@@ -72,7 +72,7 @@ All configuration is via environment variables in `.env`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `COPILOT_BIN` | `copilot` | Path to Copilot CLI binary |
-| `COPILOT_MODEL` | `claude-sonnet-4-20250514` | Default model for Copilot |
+| `COPILOT_MODEL` | `gpt-5-mini` | Default model for Copilot |
 | `COPILOT_TIMEOUT_MS` | `600000` | Max execution time (10 min) |
 | `COPILOT_AUTOPILOT` | `true` | Run in autopilot mode (`--autopilot`) |
 | `COPILOT_ALLOW_ALL` | `true` | Allow all permissions (`--allow-all`) |

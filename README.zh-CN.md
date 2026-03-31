@@ -72,7 +72,7 @@ npm start
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `COPILOT_BIN` | `copilot` | Copilot CLI 二进制路径 |
-| `COPILOT_MODEL` | `claude-sonnet-4-20250514` | Copilot 默认模型 |
+| `COPILOT_MODEL` | `gpt-5-mini` | Copilot 默认模型 |
 | `COPILOT_TIMEOUT_MS` | `600000` | 最大执行时间（10 分钟） |
 | `COPILOT_AUTOPILOT` | `true` | 自动驾驶模式（`--autopilot`） |
 | `COPILOT_ALLOW_ALL` | `true` | 允许所有权限（`--allow-all`） |

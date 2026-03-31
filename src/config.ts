@@ -138,7 +138,7 @@ export function loadConfig(): Config {
     },
     copilot: {
       bin: optional("COPILOT_BIN", "/usr/local/bin/copilot"),
-      model: optional("COPILOT_MODEL", "claude-sonnet-4"),
+      model: optional("COPILOT_MODEL", "gpt-5-mini"),
       configDir: resolvePath(optional("COPILOT_CONFIG_DIR", `${HOME}/.copilot-bridge`)),
       timeoutMs: validateTimeout(Number(optional("COPILOT_TIMEOUT_MS", "600000")), "COPILOT_TIMEOUT_MS"),
       autopilot: optional("COPILOT_AUTOPILOT", "true") === "true",
