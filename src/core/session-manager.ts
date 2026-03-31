@@ -418,14 +418,35 @@ export function listAllSessions(): Session[] {
 
 export function loadSessionsFromDisk(): void {
   const sessions = listAllSessions();
+  const latestByChat = new Map<string, Session>();
+
   for (const s of sessions) {
-    activeSessions.set(chatKey(s.platform, s.chatId), s);
-    // Restore per-chat engine override from persisted session
-    if (s.engine) {
-      restoreEngineOverride(chatKey(s.platform, s.chatId), s.engine);
+    const key = chatKey(s.platform, s.chatId);
+    const prev = latestByChat.get(key);
+    if (!prev) {
+      latestByChat.set(key, s);
+      continue;
+    }
+
+    const prevTs = Date.parse(prev.updatedAt) || 0;
+    const currTs = Date.parse(s.updatedAt) || 0;
+    if (currTs >= prevTs) {
+      latestByChat.set(key, s);
     }
   }
-  logger.info({ count: sessions.length, dir: config.session.dir }, "Loaded sessions from disk");
+
+  activeSessions.clear();
+  for (const [key, s] of latestByChat.entries()) {
+    activeSessions.set(key, s);
+    // Restore per-chat engine override from persisted session
+    if (s.engine) {
+      restoreEngineOverride(key, s.engine);
+    }
+  }
+  logger.info(
+    { count: sessions.length, activeChats: latestByChat.size, dir: config.session.dir },
+    "Loaded sessions from disk",
+  );
 }
 
 export function cleanExpiredSessions(): number {

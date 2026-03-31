@@ -15,9 +15,10 @@ import {
   recordFileSent,
 } from "../core/session-manager.js";
 import { getEngine, getExecutor } from "../engines/index.js";
+import { config } from "../config.js";
 import { nowISO } from "../utils/helpers.js";
 import { existsSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { logger } from "../utils/logger.js";
 import { buildPromptWithFiles, classifyError, enqueueChatTask } from "./utils.js";
 import { hasSensitiveContent } from "../security/file-safety.js";
@@ -192,7 +193,7 @@ export function registerPassthroughCommand(): void {
             let blockedSensitiveContentCount = 0;
             const MAX_FILE_SIZE = 50 * 1024 * 1024;
             const MAX_SEND_SIZE = 20 * 1024 * 1024;
-            const shouldMove = !session.isCustomWorkingDir;
+            const workspaceRoot = resolve(config.codex.workingDir);
             const isSensitiveFile = (p: string): boolean => {
               const name = basename(p).toLowerCase();
               if (name === ".env" || name.startsWith(".env.")) return true;
@@ -203,6 +204,10 @@ export function registerPassthroughCommand(): void {
             for (const filePath of result.newFiles) {
               try {
                 if (!existsSync(filePath)) continue;
+                const absPath = resolve(filePath);
+                // Only auto-capture files generated directly under workspace root.
+                // Files in subdirectories are left untouched and not copied to session.
+                if (dirname(absPath) !== workspaceRoot) continue;
                 if (isSensitiveFile(filePath)) {
                   blockedSensitiveFileCount++;
                   logger.warn({ filePath, sessionId: session.id }, "Blocked sensitive file from auto-save/send");
@@ -210,7 +215,7 @@ export function registerPassthroughCommand(): void {
                 }
                 const stat = statSync(filePath);
                 if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
-                const record = saveGeneratedFile(session, filePath, msg.platform, shouldMove);
+                const record = saveGeneratedFile(session, filePath, msg.platform, true);
                 if (!record) continue;
                 savedCount++;
 

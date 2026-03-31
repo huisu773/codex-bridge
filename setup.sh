@@ -147,6 +147,8 @@ if [[ -n "$CODEX_PATH" ]]; then
 fi
 
 prompt_value "Default model" "CODEX_MODEL" "gpt-5.3-codex"
+prompt_value "Copilot default model" "COPILOT_MODEL" "gpt-5-mini"
+prompt_value "Default engine (codex|copilot)" "DEFAULT_ENGINE" "codex"
 prompt_value "Working directory" "CODEX_WORKING_DIR" "$HOME/codex-workspace"
 
 header "Server & Storage"
@@ -211,6 +213,12 @@ WEBHOOK_HOST=${ENV_VALUES[WEBHOOK_HOST]}
 CODEX_MODEL=${ENV_VALUES[CODEX_MODEL]}
 CODEX_WORKING_DIR=${ENV_VALUES[CODEX_WORKING_DIR]}
 CODEX_BIN=${ENV_VALUES[CODEX_BIN]}
+
+# ---- Copilot ----
+COPILOT_MODEL=${ENV_VALUES[COPILOT_MODEL]:-gpt-5-mini}
+
+# ---- Engine ----
+DEFAULT_ENGINE=${ENV_VALUES[DEFAULT_ENGINE]:-codex}
 
 # ---- Session ----
 SESSION_DIR=${ENV_VALUES[SESSION_DIR]}
