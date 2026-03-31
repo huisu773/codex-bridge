@@ -110,7 +110,11 @@ function validateTimeout(val: number, key: string): number {
 
 export function loadConfig(): Config {
   const HOME = process.env.HOME || "/root";
-  return {
+    const engineVal = optional("DEFAULT_ENGINE", "codex");
+    if (engineVal !== "codex" && engineVal !== "copilot") {
+      throw new Error(`Invalid DEFAULT_ENGINE: ${engineVal} (must be "codex" or "copilot")`);
+    }
+    return {
     telegram: {
       botToken: required("TELEGRAM_BOT_TOKEN"),
       allowedUserIds: parseNumericIds(optional("ALLOWED_TELEGRAM_IDS", "")),
@@ -142,7 +146,7 @@ export function loadConfig(): Config {
       instructions: optional("COPILOT_INSTRUCTIONS", ""),
       staleProcessMs: validatePositiveInt(Number(optional("COPILOT_STALE_PROCESS_MS", "3600000")), "COPILOT_STALE_PROCESS_MS"),
     },
-    engine: (optional("DEFAULT_ENGINE", "codex") as "codex" | "copilot"),
+    engine: engineVal as "codex" | "copilot",
     session: {
       dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),
       maxAgeHours: validatePositiveInt(Number(optional("SESSION_MAX_AGE_HOURS", "168")), "SESSION_MAX_AGE_HOURS"),

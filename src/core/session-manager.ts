@@ -19,6 +19,18 @@ import { nowISO } from "../utils/helpers.js";
 import { restoreEngineOverride } from "../engines/index.js";
 import type { Session, ConversationEntry, FileRecord } from "../session/types.js";
 
+/** Sanitize a filename: strip path components and remove dangerous characters. */
+function sanitizeFileName(name: string): string {
+  // Take only the basename to prevent path traversal
+  let safe = basename(name);
+  // Remove null bytes and control characters
+  safe = safe.replace(/[\x00-\x1f]/g, "");
+  // Prevent hidden files (leading dot)
+  if (safe.startsWith(".")) safe = "_" + safe;
+  // Fallback if empty
+  return safe || `file_${Date.now()}`;
+}
+
 // In-memory session index: chatId → session
 const activeSessions = new Map<string, Session>();
 
@@ -216,7 +228,11 @@ export function getConversationHistory(sessionId: string): ConversationEntry[] {
   return readFileSync(file, "utf-8")
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line));
+    .map((line) => {
+      try { return JSON.parse(line); }
+      catch { return null; }
+    })
+    .filter(Boolean) as ConversationEntry[];
 }
 
 /**
@@ -294,15 +310,22 @@ export function saveReceivedFile(
   buffer: Buffer,
   platform: "telegram" | "feishu",
 ): string {
+  // Reject oversized uploads (50MB)
+  const MAX_UPLOAD_SIZE = 50 * 1024 * 1024;
+  if (buffer.length > MAX_UPLOAD_SIZE) {
+    throw new Error(`File too large (${Math.round(buffer.length / 1024 / 1024)}MB > 50MB limit)`);
+  }
+
   const destDir = join(sessionDir(session.id), "received");
   ensureDir(destDir);
-  const dest = join(destDir, fileName);
+  const safeName = sanitizeFileName(fileName);
+  const dest = join(destDir, safeName);
   writeFileSync(dest, buffer);
 
   const record: FileRecord = {
     timestamp: nowISO(),
     type: "received",
-    fileName,
+    fileName: safeName,
     originalPath: "(uploaded)",
     sessionPath: dest,
     size: buffer.length,

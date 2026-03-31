@@ -80,6 +80,6 @@ export function filterSensitiveOutput(output: string): string {
   // Mask patterns that look like API keys, tokens, passwords
   return output
     .replace(/(?:sk-|pk-|key-|token-)[a-zA-Z0-9_-]{20,}/g, "[REDACTED_KEY]")
-    .replace(/(?:password|passwd|secret|token)\s*[:=]\s*[^\s]{8,}/gi, "$1=[REDACTED]")
+    .replace(/(password|passwd|secret|token)\s*[:=]\s*[^\s]{8,}/gi, "$1=[REDACTED]")
     .replace(/Bearer\s+[a-zA-Z0-9._-]{20,}/g, "Bearer [REDACTED]");
 }

@@ -7,28 +7,57 @@ import { execSync } from "node:child_process";
 import { config } from "../config.js";
 import { getEngine, setEngine, getEngineLabel, type EngineName } from "../engines/index.js";
 
+/** Allowlist of safe commands for /exec */
+const EXEC_ALLOWED_PREFIXES = [
+  "ls", "cat", "head", "tail", "wc", "grep", "find", "tree",
+  "git status", "git log", "git diff", "git branch", "git show",
+  "pwd", "df", "du", "file", "stat", "echo", "date", "whoami",
+  "npm list", "npm outdated", "node -v", "npm -v",
+];
+
+function isExecAllowed(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  return EXEC_ALLOWED_PREFIXES.some((prefix) =>
+    trimmed === prefix || trimmed.startsWith(prefix + " "),
+  );
+}
+
 function defaultModelForEngine(engine: "codex" | "copilot"): string {
   return engine === "copilot" ? config.copilot.model : config.codex.model;
 }
 
 export function registerCustomCommands(): void {
-  // /exec — Execute a shell command directly
+  // /exec — Execute a safe, read-only shell command
   registerCommand({
     name: "exec",
     aliases: ["run", "sh"],
-    description: "Execute a shell command directly",
-    usage: "/exec <command>",
+    description: "Execute a read-only shell command (safe commands only)",
+    usage: "/exec <command>  (allowed: ls, cat, git status, grep, ...)",
     execute: async (_msg, args, sendReply) => {
       if (!args) {
-        await sendReply("Usage: /exec <command>");
+        await sendReply(
+          "Usage: /exec <command>\n\n" +
+          "Allowed commands: " + EXEC_ALLOWED_PREFIXES.join(", "),
+        );
         return;
       }
+
+      if (!isExecAllowed(args)) {
+        await sendReply(
+          "🚫 Command not allowed. Only safe read-only commands are permitted.\n\n" +
+          "Allowed: " + EXEC_ALLOWED_PREFIXES.join(", "),
+        );
+        return;
+      }
+
       try {
         const output = execSync(args, {
           timeout: 60_000,
           maxBuffer: 1024 * 1024,
           encoding: "utf-8",
           cwd: config.codex.workingDir,
+          // Prevent shell expansion of dangerous operators
+          shell: "/bin/bash",
         });
         await sendReply(output || "(no output)");
       } catch (err: any) {
@@ -51,6 +80,12 @@ export function registerCustomCommands(): void {
       }
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
       const newDir = resolve(session.workingDir, args.trim());
+      // Prevent path traversal outside the configured workspace root
+      const workspaceRoot = resolve(config.codex.workingDir);
+      if (!newDir.startsWith(workspaceRoot)) {
+        await sendReply(`🚫 Cannot navigate outside workspace root: ${workspaceRoot}`);
+        return;
+      }
       if (!existsSync(newDir)) {
         await sendReply(`❌ Directory not found: ${newDir}`);
         return;
