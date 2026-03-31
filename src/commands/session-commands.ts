@@ -21,7 +21,7 @@ import {
 } from "../engines/index.js";
 import { nowISO } from "../utils/helpers.js";
 import { getServiceMetrics } from "../utils/metrics.js";
-import { getCodexAccountInfo } from "./utils.js";
+import { getCodexAccountInfo, getCopilotAccountInfo } from "./utils.js";
 
 export function registerSessionCommands(): void {
   registerCommand({
@@ -52,6 +52,7 @@ export function registerSessionCommands(): void {
       const totalRunning = getTotalRunningCount();
       const allSessions = listAllSessions();
       const account = getCodexAccountInfo();
+      const copilotAccount = getCopilotAccountInfo();
       const metrics = getServiceMetrics(totalRunning);
       const chatKey = `${msg.platform}:${msg.chatId}`;
       const engine = getEngine(chatKey);
@@ -89,8 +90,14 @@ export function registerSessionCommands(): void {
         sessionInfo,
         "",
         "— Account —",
-        `Plan: ${account.plan || "unknown"}`,
-        account.subscriptionStatus ? `Sub: ${account.subscriptionStatus}` : "",
+        `Codex Plan: ${account.plan || "unknown"}`,
+        account.subscriptionStatus ? `Codex Sub: ${account.subscriptionStatus}` : "",
+        `Copilot CLI: ${copilotAccount.binStatus || "unknown"} (${copilotAccount.bin || "unknown"})`,
+        copilotAccount.version ? `Copilot Version: ${copilotAccount.version}` : "",
+        `Copilot Auth: ${copilotAccount.authSource || "unknown"}`,
+        copilotAccount.user ? `Copilot User: ${copilotAccount.user}` : "",
+        copilotAccount.host ? `Copilot Host: ${copilotAccount.host}` : "",
+        copilotAccount.tokenStatus ? `Copilot Token: ${copilotAccount.tokenStatus}` : "",
         "",
         `Sessions: ${allSessions.length}`,
       ].filter(Boolean);

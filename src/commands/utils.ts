@@ -4,6 +4,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import { execFileSync } from "node:child_process";
 
 /** Build the prompt by injecting pending file context and separating images. */
 export function buildPromptWithFiles(
@@ -123,6 +125,45 @@ export function getCodexAccountInfo(): Record<string, string> {
 
     if (auth.last_refresh) {
       info.lastRefresh = auth.last_refresh;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return info;
+}
+
+/** Parse local settings to derive Copilot account/runtime info (best effort). */
+export function getCopilotAccountInfo(): Record<string, string> {
+  const info: Record<string, string> = {};
+  try {
+    info.bin = config.copilot.bin;
+    info.binStatus = existsSync(config.copilot.bin) ? "✅ Found" : "❌ Not found";
+
+    if (process.env.COPILOT_GITHUB_TOKEN) info.authSource = "COPILOT_GITHUB_TOKEN";
+    else if (process.env.GH_TOKEN) info.authSource = "GH_TOKEN";
+    else if (process.env.GITHUB_TOKEN) info.authSource = "GITHUB_TOKEN";
+    else info.authSource = "local credential store / config";
+
+    const ghHostsPath = process.env.HOME
+      ? `${process.env.HOME}/.config/gh/hosts.yml`
+      : "/root/.config/gh/hosts.yml";
+    if (existsSync(ghHostsPath)) {
+      const text = readFileSync(ghHostsPath, "utf-8");
+      const userMatch = text.match(/^\s*user:\s*([^\s]+)\s*$/m);
+      const hostMatch = text.match(/^([^\s:]+):\s*$/m);
+      if (userMatch?.[1]) info.user = userMatch[1];
+      if (hostMatch?.[1]) info.host = hostMatch[1];
+      if (text.includes("oauth_token:")) info.tokenStatus = "✅ Present";
+    }
+
+    try {
+      const version = execFileSync(config.copilot.bin, ["--version"], {
+        encoding: "utf-8",
+        timeout: 2000,
+      }).trim();
+      if (version) info.version = version;
+    } catch {
+      // Ignore version probe failures
     }
   } catch {
     // Ignore parse errors
