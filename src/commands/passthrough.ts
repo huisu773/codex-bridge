@@ -17,8 +17,10 @@ import {
 import { getEngine, getExecutor } from "../engines/index.js";
 import { nowISO } from "../utils/helpers.js";
 import { existsSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { logger } from "../utils/logger.js";
 import { buildPromptWithFiles, classifyError, enqueueChatTask } from "./utils.js";
+import { hasSensitiveContent } from "../security/file-safety.js";
 
 export function registerPassthroughCommand(): void {
   registerCommand({
@@ -43,7 +45,22 @@ export function registerPassthroughCommand(): void {
         // Streaming support
         let streamMsgId = "";
         let lastStreamUpdate = 0;
+        let latestAccumulatedText = "";
+        let streamUpdateSeq = 0;
+        let streamFinalizing = false;
+        let streamUpdateChain = Promise.resolve();
         const STREAM_THROTTLE_MS = msg.platform === "feishu" ? 1000 : 500;
+
+        const queueStreamUpdate = (text: string): void => {
+          if (!streamMsgId || !msg.updateStream) return;
+          const seq = ++streamUpdateSeq;
+          streamUpdateChain = streamUpdateChain.then(async () => {
+            if (streamFinalizing) return;
+            // Drop stale updates; only render the latest pending content.
+            if (seq !== streamUpdateSeq) return;
+            try { await msg.updateStream!(streamMsgId, text); } catch { /* ignore */ }
+          });
+        };
 
         if (msg.sendStreamStart) {
           try {
@@ -55,10 +72,11 @@ export function registerPassthroughCommand(): void {
         let heartbeatCount = 0;
         const heartbeatInterval = setInterval(async () => {
           heartbeatCount++;
-          const text = `⏳ Still working... (${heartbeatCount}m elapsed)`;
-          if (streamMsgId && msg.updateStream) {
-            try { await msg.updateStream(streamMsgId, text); } catch { /* ignore */ }
-          }
+          const heartbeatLine = `⏳ Still working... (${heartbeatCount}m elapsed)`;
+          const text = latestAccumulatedText
+            ? `${latestAccumulatedText}\n\n${heartbeatLine}`
+            : heartbeatLine;
+          queueStreamUpdate(text);
         }, 60_000);
 
         try {
@@ -81,15 +99,21 @@ export function registerPassthroughCommand(): void {
               }
             },
             onTextEvent: (_newText, accumulated) => {
+              latestAccumulatedText = accumulated;
               if (streamMsgId && msg.updateStream) {
                 const now = Date.now();
                 if (now - lastStreamUpdate >= STREAM_THROTTLE_MS) {
                   lastStreamUpdate = now;
-                  msg.updateStream(streamMsgId, accumulated).catch(() => {});
+                  queueStreamUpdate(accumulated);
                 }
               }
             },
           });
+
+          // Stop heartbeat before final render to avoid late heartbeat overwriting output.
+          clearInterval(heartbeatInterval);
+          streamFinalizing = true;
+          await streamUpdateChain.catch(() => {});
 
           // Save session ID for multi-turn resume
           if (result.sessionId) {
@@ -132,7 +156,7 @@ export function registerPassthroughCommand(): void {
           } else if (streamMsgId && !result.output) {
             const statusMsg = result.success
               ? "✅ Done (no output)."
-              : `❌ Codex exited with code ${result.exitCode}.`;
+              : `❌ ${engine === "copilot" ? "Copilot" : "Codex"} exited with code ${result.exitCode}.`;
             const finalize = msg.finalizeStream || msg.updateStream;
             if (finalize) {
               await finalize(streamMsgId, statusMsg).catch(() => {});
@@ -144,7 +168,7 @@ export function registerPassthroughCommand(): void {
           } else {
             const statusMsg = result.success
               ? "✅ Done (no output)."
-              : `❌ Codex exited with code ${result.exitCode}.`;
+              : `❌ ${engine === "copilot" ? "Copilot" : "Codex"} exited with code ${result.exitCode}.`;
             await sendReply(statusMsg);
           }
 
@@ -163,26 +187,51 @@ export function registerPassthroughCommand(): void {
           if (result.newFiles.length > 0) {
             let savedCount = 0;
             let sentCount = 0;
+            let tooLargeToSendCount = 0;
+            let blockedSensitiveFileCount = 0;
+            let blockedSensitiveContentCount = 0;
             const MAX_FILE_SIZE = 50 * 1024 * 1024;
             const MAX_SEND_SIZE = 20 * 1024 * 1024;
             const shouldMove = !session.isCustomWorkingDir;
+            const isSensitiveFile = (p: string): boolean => {
+              const name = basename(p).toLowerCase();
+              if (name === ".env" || name.startsWith(".env.")) return true;
+              if (name.endsWith(".pem") || name.endsWith(".key") || name.endsWith(".p12") || name.endsWith(".pfx")) return true;
+              if (name === "id_rsa" || name === "id_ed25519") return true;
+              return false;
+            };
             for (const filePath of result.newFiles) {
               try {
                 if (!existsSync(filePath)) continue;
+                if (isSensitiveFile(filePath)) {
+                  blockedSensitiveFileCount++;
+                  logger.warn({ filePath, sessionId: session.id }, "Blocked sensitive file from auto-save/send");
+                  continue;
+                }
                 const stat = statSync(filePath);
                 if (!stat.isFile() || stat.size === 0 || stat.size > MAX_FILE_SIZE) continue;
                 const record = saveGeneratedFile(session, filePath, msg.platform, shouldMove);
                 if (!record) continue;
                 savedCount++;
 
-                if (stat.size <= MAX_SEND_SIZE) {
-                  try {
-                    await sendFile(record.sessionPath, record.fileName);
-                    recordFileSent(session, record.sessionPath, msg.platform);
-                    sentCount++;
-                  } catch (sendErr) {
-                    logger.warn({ err: sendErr, file: record.fileName }, "Failed to send file to user");
-                  }
+                if (stat.size > MAX_SEND_SIZE) {
+                  tooLargeToSendCount++;
+                  continue;
+                }
+                if (hasSensitiveContent(record.sessionPath)) {
+                  blockedSensitiveContentCount++;
+                  logger.warn(
+                    { filePath: record.sessionPath, sessionId: session.id },
+                    "Blocked file send due to sensitive content",
+                  );
+                  continue;
+                }
+                try {
+                  await sendFile(record.sessionPath, record.fileName);
+                  recordFileSent(session, record.sessionPath, msg.platform);
+                  sentCount++;
+                } catch (sendErr) {
+                  logger.warn({ err: sendErr, file: record.fileName }, "Failed to send file to user");
                 }
               } catch {
                 // Ignore individual file save errors
@@ -190,9 +239,26 @@ export function registerPassthroughCommand(): void {
             }
             if (savedCount > 0) {
               const sentNote = sentCount > 0 ? ` (${sentCount} sent)` : "";
-              const unsent = savedCount - sentCount;
-              const unsentNote = unsent > 0 ? `\n📂 ${unsent} file(s) too large to send, saved in session.` : "";
-              await sendReply(`📁 ${savedCount} file(s) saved${sentNote}.${unsentNote}`);
+              const tooLargeNote = tooLargeToSendCount > 0
+                ? `\n📂 ${tooLargeToSendCount} file(s) too large to send, saved in session.`
+                : "";
+              const blockedFileNote = blockedSensitiveFileCount > 0
+                ? `\n🔒 ${blockedSensitiveFileCount} sensitive file(s) blocked from auto-save/send.`
+                : "";
+              const blockedContentNote = blockedSensitiveContentCount > 0
+                ? `\n🔒 ${blockedSensitiveContentCount} file(s) contained sensitive content (API key/token/secret) and were not sent.`
+                : "";
+              await sendReply(`📁 ${savedCount} file(s) saved${sentNote}.${tooLargeNote}${blockedFileNote}${blockedContentNote}`);
+            } else if (blockedSensitiveFileCount > 0 || blockedSensitiveContentCount > 0) {
+              const notes = [
+                blockedSensitiveFileCount > 0
+                  ? `🔒 Blocked ${blockedSensitiveFileCount} sensitive file(s) from auto-save/send.`
+                  : "",
+                blockedSensitiveContentCount > 0
+                  ? `🔒 Blocked ${blockedSensitiveContentCount} file(s) from sending due to sensitive content.`
+                  : "",
+              ].filter(Boolean).join("\n");
+              await sendReply(notes);
             }
           }
         } catch (err) {

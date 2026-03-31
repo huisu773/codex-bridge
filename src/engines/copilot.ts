@@ -124,13 +124,14 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
     "Starting Copilot execution",
   );
 
-  return new Promise<EngineExecResult>((resolve) => {
-    let resolved = false;
-    let sessionId: string | undefined;
-    let resultExitCode = 0;
-    const textSegments: string[] = [];
-    let currentMessage = "";
-    let lastActivity = Date.now();
+    return new Promise<EngineExecResult>((resolve) => {
+      let resolved = false;
+      let sessionId: string | undefined;
+      let resultExitCode = 0;
+      const textSegments: string[] = [];
+      let currentMessage = "";
+      let taskCompleteSummary: string | undefined;
+      let lastActivity = Date.now();
 
     const proc = spawn(config.copilot.bin, args, {
       cwd: workDir,
@@ -223,6 +224,10 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
           break;
         case "tool.execution_complete": {
           const data = event.data as { toolName?: string; result?: string; success?: boolean };
+          if (data?.toolName === "task_complete") {
+            const result = data.result as { content?: string; detailedContent?: string } | undefined;
+            taskCompleteSummary = result?.content || result?.detailedContent || taskCompleteSummary;
+          }
           logger.debug({ execId, tool: data?.toolName, success: data?.success }, "Copilot tool completed");
           break;
         }
@@ -237,6 +242,11 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
           sessionId = (event.sessionId as string) || sessionId;
           resultExitCode = (event.exitCode as number) ?? 0;
           break;
+        case "session.task_complete": {
+          const data = event.data as { summary?: string } | undefined;
+          taskCompleteSummary = data?.summary || taskCompleteSummary;
+          break;
+        }
         case "session.start": case "session.model_change": case "session.mcp_server_status_changed":
         case "session.mcp_servers_loaded": case "session.tools_updated": case "user.message":
         case "assistant.reasoning_delta": case "assistant.reasoning": case "assistant.turn_start":
@@ -252,7 +262,10 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
 
     proc.on("close", (code: number | null) => {
       const exitCode = code ?? resultExitCode;
-      const output = textSegments.join("\n\n").trim() || currentMessage.trim() || (stderrBuf.trim() ? `stderr: ${stderrBuf.trim()}` : "(no output)");
+      const assembled = textSegments.join("\n\n").trim() || currentMessage.trim();
+      const output = taskCompleteSummary
+        ? [assembled, taskCompleteSummary].filter(Boolean).join("\n\n")
+        : (assembled || (stderrBuf.trim() ? `stderr: ${stderrBuf.trim()}` : "(no output)"));
       finish({ success: exitCode === 0, output, exitCode, durationMs: Date.now() - startTime, timedOut: false, newFiles: [], sessionId });
     });
 

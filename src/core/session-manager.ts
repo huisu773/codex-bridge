@@ -193,7 +193,9 @@ export function appendConversation(
     JSON.stringify(entry) + "\n",
   );
   // Human-readable text log
-  const roleLabel = entry.role === "user" ? "👤 You" : entry.role === "assistant" ? "🤖 Codex" : "⚙️ System";
+  const metadata = entry.metadata as { engine?: "codex" | "copilot" } | undefined;
+  const assistantLabel = metadata?.engine === "copilot" ? "🤖 Copilot" : "🤖 Codex";
+  const roleLabel = entry.role === "user" ? "👤 You" : entry.role === "assistant" ? assistantLabel : "⚙️ System";
   const filesNote = entry.files?.length ? `\n[Files: ${entry.files.join(", ")}]` : "";
   appendFileSync(
     join(dir, "conversation.txt"),
