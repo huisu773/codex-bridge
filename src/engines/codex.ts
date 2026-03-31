@@ -236,20 +236,9 @@ export const codexEngine: EngineExecutor = {
 
   listModels() {
     return [
-      { id: "gpt-5.4", description: "GPT-5.4 — flagship reasoning & coding", recommended: true },
-      { id: "gpt-5.4-mini", description: "GPT-5.4 Mini — fast & lightweight" },
+      { id: "gpt-5.4-mini", description: "GPT-5.4 Mini — fast & lightweight", recommended: true },
+      { id: "gpt-5.4", description: "GPT-5.4 — flagship reasoning & coding" },
       { id: "gpt-5.3-codex", description: "GPT-5.3 Codex — complex projects" },
-      { id: "gpt-5.2-codex", description: "GPT-5.2 Codex — agentic coding" },
-      { id: "gpt-5.2", description: "GPT-5.2" },
-      { id: "gpt-5.1-codex-max", description: "GPT-5.1 Codex Max — project-scale tasks" },
-      { id: "gpt-5.1-codex", description: "GPT-5.1 Codex" },
-      { id: "gpt-5.1-codex-mini", description: "GPT-5.1 Codex Mini" },
-      { id: "gpt-5.1", description: "GPT-5.1" },
-      { id: "gpt-5-mini", description: "GPT-5 Mini" },
-      { id: "o4-mini", description: "O4 Mini — fast reasoning" },
-      { id: "o3", description: "O3 — reasoning model" },
-      { id: "codex-mini-latest", description: "Codex Mini — low-latency local dev" },
-      { id: "gpt-4.1", description: "GPT-4.1" },
     ];
   },
 };

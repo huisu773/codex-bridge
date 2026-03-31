@@ -13,13 +13,26 @@
 - 🔐 **Secure**: User ID whitelist + rate limiting + sensitive output filtering
 - 📂 **Session Management**: Per-session directories with full conversation + file tracking
 - 📎 **File I/O**: Upload files through chat; files created by the engine are saved and reported
-- 🖼️ **Image Input**: Send images for analysis (Codex via `-i` flag)
+- 🖼️ **Image Input**: Send images for analysis (supported by both Codex and Copilot engines)
 - 🎤 **Voice Messages**: Auto-transcribed to text (STT) and sent to the engine
 - 📡 **Streaming**: Real-time streaming responses with progress indicators
 - 🔧 **Extensible Commands**: Built-in + custom commands with Telegram autocomplete sync
 - 🚀 **systemd Service**: Auto-start on boot, managed as a system daemon
 
 ## Quick Start
+
+### Option 0: Ask Codex to Install This Repo (Fastest)
+
+```text
+Please install and set up this project for me:
+https://github.com/huisu773/codex-bridge
+
+Requirements:
+1) Clone the repo
+2) Install dependencies
+3) Run the setup script
+4) Tell me what credentials/tokens you still need from me
+```
 
 ### Option A: Interactive Setup (Recommended)
 
@@ -61,7 +74,7 @@ All configuration is via environment variables in `.env`:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DEFAULT_ENGINE` | | Default engine: `codex` or `copilot` (default: `codex`) |
-| `CODEX_MODEL` | | Model name (default: `gpt-5.3-codex`) |
+| `CODEX_MODEL` | | Model name (default: `gpt-5.4-mini`) |
 | `CODEX_WORKING_DIR` | | Working directory (default: `~/codex-workspace`) |
 | `CODEX_BIN` | | Path to codex binary (auto-detected) |
 | `SESSION_DIR` | | Session storage path (default: `~/codex-workspace/sessions`) |
@@ -155,28 +168,24 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 
 | Model | Description |
 |-------|-------------|
-| `gpt-5.4` ⭐ | GPT-5.4 — flagship reasoning & coding |
-| `gpt-5.4-mini` | GPT-5.4 Mini — fast & lightweight |
+| `gpt-5.4-mini` ⭐ | GPT-5.4 Mini — fast & lightweight |
+| `gpt-5.4` | GPT-5.4 — flagship reasoning & coding |
 | `gpt-5.3-codex` | GPT-5.3 Codex — complex projects |
-| `gpt-5.2-codex` | GPT-5.2 Codex — agentic coding |
-| `gpt-5.1-codex-max` | GPT-5.1 Codex Max — project-scale tasks |
-| `gpt-5.1-codex` | GPT-5.1 Codex |
-| `o4-mini` | O4 Mini — fast reasoning |
-| `o3` | O3 — reasoning model |
-| `codex-mini-latest` | Codex Mini — low-latency |
-| `gpt-4.1` | GPT-4.1 |
 
 **Copilot Engine (multi-provider):**
 
 | Model | Description |
 |-------|-------------|
-| `claude-sonnet-4.6` ⭐ | Claude Sonnet 4.6 — latest balanced |
+| `gpt-5-mini` ⭐ | GPT-5 Mini |
+| `claude-sonnet-4.6` | Claude Sonnet 4.6 — latest balanced |
 | `claude-opus-4.6` | Claude Opus 4.6 — deep reasoning |
 | `claude-haiku-4.5` | Claude Haiku 4.5 — fast & light |
 | `gpt-5.4` | GPT-5.4 |
 | `gpt-5.3-codex` | GPT-5.3 Codex |
-| `gemini-2.5-pro` | Gemini 2.5 Pro |
-| `gemini-3-flash` | Gemini 3 Flash (preview) |
+| `gpt-4o` | GPT-4o |
+| `gpt-4.1` | GPT-4.1 |
+| `gemini-3.1-pro` | Gemini 3.1 Pro |
+| `gemini-3-flash` | Gemini 3 Flash |
 
 > Models marked ⭐ are recommended defaults. Available models may vary by account plan.
 
@@ -190,7 +199,7 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 
 ### Image & Voice
 
-- **Send an image**: analyzed via the engine (Codex uses `-i` flag; Copilot ignores images)
+- **Send an image**: analyzed via the active engine (Codex/Copilot)
 - **Send a voice message**: automatically transcribed to text (if STT configured)
 
 #### STT Provider Setup

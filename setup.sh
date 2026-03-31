@@ -146,7 +146,7 @@ if [[ -n "$CODEX_PATH" ]]; then
   fi
 fi
 
-prompt_value "Default model" "CODEX_MODEL" "gpt-5.3-codex"
+prompt_value "Default model" "CODEX_MODEL" "gpt-5.4-mini"
 prompt_value "Copilot default model" "COPILOT_MODEL" "gpt-5-mini"
 prompt_value "Default engine (codex|copilot)" "DEFAULT_ENGINE" "codex"
 prompt_value "Working directory" "CODEX_WORKING_DIR" "$HOME/codex-workspace"

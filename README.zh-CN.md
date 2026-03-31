@@ -13,13 +13,26 @@
 - 🔐 **安全防护**：User ID 白名单 + 速率限制 + 敏感信息过滤
 - 📂 **Session 管理**：独立会话目录，完整记录对话和文件
 - 📎 **文件收发**：支持通过聊天上传文件，引擎生成的文件保存在会话目录中
-- 🖼️ **图片输入**：发送图片进行分析（Codex 使用 `-i` 参数）
+- 🖼️ **图片输入**：发送图片进行分析（Codex 与 Copilot 引擎均支持）
 - 🎤 **语音消息**：自动转录为文字（需配置 STT）
 - 📡 **流式输出**：实时流式回复，带进度指示器
 - 🔧 **可扩展命令**：内置 + 自定义命令，Telegram 斜杠命令自动同步到菜单
 - 🚀 **systemd 服务**：开机自启 + 守护进程
 
 ## 快速开始
+
+### 方式零：把仓库链接直接交给 Codex 安装（最快）
+
+```text
+请帮我安装并配置这个项目：
+https://github.com/huisu773/codex-bridge
+
+要求：
+1) 克隆仓库
+2) 安装依赖
+3) 运行 setup 脚本
+4) 告诉我还缺哪些凭证/令牌需要我提供
+```
 
 ### 方式一：交互式安装（推荐）
 
@@ -61,7 +74,7 @@ npm start
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `DEFAULT_ENGINE` | | 默认引擎：`codex` 或 `copilot`（默认：`codex`） |
-| `CODEX_MODEL` | | 模型名称（默认：`gpt-5.3-codex`） |
+| `CODEX_MODEL` | | 模型名称（默认：`gpt-5.4-mini`） |
 | `CODEX_WORKING_DIR` | | 工作目录（默认：`~/codex-workspace`） |
 | `CODEX_BIN` | | Codex 二进制路径（自动检测） |
 | `SESSION_DIR` | | 会话存储路径（默认：`~/codex-workspace/sessions`） |
@@ -155,28 +168,24 @@ npm start
 
 | 模型 | 说明 |
 |------|------|
-| `gpt-5.4` ⭐ | GPT-5.4 — 旗舰推理与编程 |
-| `gpt-5.4-mini` | GPT-5.4 Mini — 快速轻量 |
+| `gpt-5.4-mini` ⭐ | GPT-5.4 Mini — 快速轻量 |
+| `gpt-5.4` | GPT-5.4 — 旗舰推理与编程 |
 | `gpt-5.3-codex` | GPT-5.3 Codex — 复杂项目 |
-| `gpt-5.2-codex` | GPT-5.2 Codex — 智能体编程 |
-| `gpt-5.1-codex-max` | GPT-5.1 Codex Max — 项目级任务 |
-| `gpt-5.1-codex` | GPT-5.1 Codex |
-| `o4-mini` | O4 Mini — 快速推理 |
-| `o3` | O3 — 推理模型 |
-| `codex-mini-latest` | Codex Mini — 低延迟 |
-| `gpt-4.1` | GPT-4.1 |
 
 **Copilot 引擎（多提供商）：**
 
 | 模型 | 说明 |
 |------|------|
-| `claude-sonnet-4.6` ⭐ | Claude Sonnet 4.6 — 最新均衡 |
+| `gpt-5-mini` ⭐ | GPT-5 Mini |
+| `claude-sonnet-4.6` | Claude Sonnet 4.6 — 最新均衡 |
 | `claude-opus-4.6` | Claude Opus 4.6 — 深度推理 |
 | `claude-haiku-4.5` | Claude Haiku 4.5 — 快速轻量 |
 | `gpt-5.4` | GPT-5.4 |
 | `gpt-5.3-codex` | GPT-5.3 Codex |
-| `gemini-2.5-pro` | Gemini 2.5 Pro |
-| `gemini-3-flash` | Gemini 3 Flash（预览） |
+| `gpt-4o` | GPT-4o |
+| `gpt-4.1` | GPT-4.1 |
+| `gemini-3.1-pro` | Gemini 3.1 Pro |
+| `gemini-3-flash` | Gemini 3 Flash |
 
 > ⭐ 标记为推荐默认模型。可用模型可能因账户计划而异。
 
@@ -188,7 +197,7 @@ npm start
 
 ### 图片与语音
 
-- **发送图片**：通过引擎分析（Codex 使用 `-i` 参数；Copilot 忽略图片）
+- **发送图片**：通过当前引擎分析（Codex/Copilot）
 - **发送语音**：自动转录为文字（需配置 STT）
 
 #### STT 语音识别提供商

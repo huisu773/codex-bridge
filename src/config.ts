@@ -131,7 +131,7 @@ export function loadConfig(): Config {
       host: optional("WEBHOOK_HOST", "127.0.0.1"),
     },
     codex: {
-      model: optional("CODEX_MODEL", "gpt-5.3-codex"),
+      model: optional("CODEX_MODEL", "gpt-5.4-mini"),
       workingDir: resolvePath(optional("CODEX_WORKING_DIR", `${HOME}/codex-workspace`)),
       bin: optional("CODEX_BIN", "/usr/bin/codex"),
       timeoutMs: validateTimeout(Number(optional("CODEX_TIMEOUT_MS", "600000")), "CODEX_TIMEOUT_MS"),
