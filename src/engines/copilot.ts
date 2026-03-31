@@ -15,6 +15,7 @@ import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { recordCopilotExecution } from "../utils/metrics.js";
 import { snapshotDir, diffSnapshots } from "./file-snapshot.js";
+import { COPILOT_MODELS } from "./model-catalog.js";
 import type { EngineExecutor, EngineExecOptions, EngineExecResult } from "./types.js";
 
 // ─── Default instructions (overridable via COPILOT_INSTRUCTIONS) ──────────
@@ -326,17 +327,6 @@ export const copilotEngine: EngineExecutor = {
   },
 
   listModels() {
-    return [
-      { id: "gpt-5-mini", description: "GPT-5 Mini", recommended: true },
-      { id: "claude-sonnet-4.6", description: "Claude Sonnet 4.6 — latest balanced" },
-      { id: "claude-opus-4.6", description: "Claude Opus 4.6 — deep reasoning" },
-      { id: "claude-haiku-4.5", description: "Claude Haiku 4.5 — fast & light" },
-      { id: "gpt-5.4", description: "GPT-5.4" },
-      { id: "gpt-5.3-codex", description: "GPT-5.3 Codex" },
-      { id: "gpt-4o", description: "GPT-4o" },
-      { id: "gpt-4.1", description: "GPT-4.1" },
-      { id: "gemini-3.1-pro", description: "Gemini 3.1 Pro" },
-      { id: "gemini-3-flash", description: "Gemini 3 Flash" },
-    ];
+    return COPILOT_MODELS;
   },
 };

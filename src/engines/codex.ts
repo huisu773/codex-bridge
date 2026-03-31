@@ -14,6 +14,7 @@ import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { recordCodexExecution } from "../utils/metrics.js";
 import { snapshotDir, diffSnapshots } from "./file-snapshot.js";
+import { CODEX_MODELS } from "./model-catalog.js";
 import type { EngineExecutor, EngineExecOptions, EngineExecResult } from "./types.js";
 
 // ─── Running process tracking ─────────────────────────────────────────────
@@ -235,10 +236,6 @@ export const codexEngine: EngineExecutor = {
   },
 
   listModels() {
-    return [
-      { id: "gpt-5.4-mini", description: "GPT-5.4 Mini — fast & lightweight", recommended: true },
-      { id: "gpt-5.4", description: "GPT-5.4 — flagship reasoning & coding" },
-      { id: "gpt-5.3-codex", description: "GPT-5.3 Codex — complex projects" },
-    ];
+    return CODEX_MODELS;
   },
 };
