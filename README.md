@@ -200,6 +200,7 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 ### Image & Voice
 
 - **Send an image**: analyzed via the active engine (Codex/Copilot)
+  Copilot CLI image references are passed as `@path/to/image.png` in the prompt.
 - **Send a voice message**: automatically transcribed to text (if STT configured)
 
 #### STT Provider Setup

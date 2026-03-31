@@ -7,7 +7,7 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -88,12 +88,23 @@ function sleep(ms: number): Promise<void> {
 const SPAWN_RETRY_LIMIT = 2;
 const SPAWN_RETRY_DELAY_MS = 3000;
 
+export function buildPromptWithImageRefs(prompt: string, images: string[] | undefined, workDir: string): string {
+  if (!images || images.length === 0) return prompt;
+  const refs = images.map((img) => {
+    const rel = relative(workDir, img);
+    const normalized = rel && !rel.startsWith("..") ? rel : img;
+    return `@${normalized}`;
+  });
+  return `${prompt}\n\nAttached image files:\n${refs.join("\n")}\n\nPlease use these images as visual context.`;
+}
+
 // ─── Executor implementation ──────────────────────────────────────────────
 
 async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecResult> {
   const model = opts.model || config.copilot.model;
   const workDir = opts.workingDir || config.codex.workingDir;
   const timeoutMs = opts.timeoutMs || config.copilot.timeoutMs;
+  const prompt = buildPromptWithImageRefs(opts.prompt, opts.images, workDir);
   const startTime = Date.now();
   const execId = randomUUID().slice(0, 8);
 
@@ -109,23 +120,18 @@ async function executeCopilotOnce(opts: EngineExecOptions): Promise<EngineExecRe
   const configDir = getOrCreateConfigDir();
 
   const args = [
-    "-p", opts.prompt,
+    "-p", prompt,
     "--output-format", "json",
     "--model", model,
     "--config-dir", configDir,
     "--no-color",
   ];
-  if (opts.images) {
-    for (const img of opts.images) {
-      args.push("-i", img);
-    }
-  }
   if (config.copilot.allowAll) args.push("--allow-all");
   if (config.copilot.autopilot) args.push("--autopilot");
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
   logger.info(
-    { engine: "copilot", model, workDir, promptLen: opts.prompt.length, execId, resume: opts.resumeSessionId || "new" },
+    { engine: "copilot", model, workDir, promptLen: prompt.length, imageCount: opts.images?.length || 0, execId, resume: opts.resumeSessionId || "new" },
     "Starting Copilot execution",
   );
 

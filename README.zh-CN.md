@@ -198,6 +198,7 @@ npm start
 ### 图片与语音
 
 - **发送图片**：通过当前引擎分析（Codex/Copilot）
+  Copilot CLI 会在 prompt 中使用 `@path/to/image.png` 的文件引用形式。
 - **发送语音**：自动转录为文字（需配置 STT）
 
 #### STT 语音识别提供商
