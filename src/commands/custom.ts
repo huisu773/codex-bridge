@@ -12,7 +12,7 @@ const EXEC_ALLOWED_PREFIXES = [
   "ls", "cat", "head", "tail", "wc", "grep", "find", "tree",
   "git status", "git log", "git diff", "git branch", "git show",
   "pwd", "df", "du", "file", "stat", "echo", "date", "whoami",
-  "npm list", "npm outdated", "node -v", "npm -v",
+  "npm list", "npm outdated", "node -v", "npm -v", "reboot",
 ];
 
 function isExecAllowed(cmd: string): boolean {

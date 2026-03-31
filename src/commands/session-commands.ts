@@ -88,18 +88,13 @@ export function registerSessionCommands(): void {
         "",
         "— Session —",
         sessionInfo,
+        `Sessions: ${allSessions.length}`,
         "",
         "— Account —",
         `Codex Plan: ${account.plan || "unknown"}`,
         account.subscriptionStatus ? `Codex Sub: ${account.subscriptionStatus}` : "",
-        `Copilot CLI: ${copilotAccount.binStatus || "unknown"} (${copilotAccount.bin || "unknown"})`,
-        copilotAccount.version ? `Copilot Version: ${copilotAccount.version}` : "",
-        `Copilot Auth: ${copilotAccount.authSource || "unknown"}`,
         copilotAccount.user ? `Copilot User: ${copilotAccount.user}` : "",
-        copilotAccount.host ? `Copilot Host: ${copilotAccount.host}` : "",
         copilotAccount.tokenStatus ? `Copilot Token: ${copilotAccount.tokenStatus}` : "",
-        "",
-        `Sessions: ${allSessions.length}`,
       ].filter(Boolean);
 
       await sendReply(lines.join("\n"));
