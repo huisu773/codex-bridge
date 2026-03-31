@@ -111,9 +111,9 @@ export function registerSessionCommands(): void {
       const chatKey = `${msg.platform}:${msg.chatId}`;
       const engineName = getEngine(chatKey);
       const executor = getExecutor(engineName);
+      const models = executor.listModels();
 
       if (!args) {
-        const models = executor.listModels();
         const lines = models.map((m) => {
           const marker = m.id === session.model ? " ✅" : "";
           const rec = m.recommended ? " ⭐" : "";
@@ -129,7 +129,17 @@ export function registerSessionCommands(): void {
         );
         return;
       }
+
       const newModel = args.trim();
+      const allowedModels = new Set(models.map((m) => m.id));
+      if (!allowedModels.has(newModel)) {
+        await sendReply(
+          `❌ Unsupported model for ${executor.name}: \`${newModel}\`\n` +
+            `Use \`/models\` to see the documented model list.`,
+        );
+        return;
+      }
+
       updateSessionModel(session, newModel);
       await sendReply(`✅ Model switched to: \`${newModel}\``);
     },
