@@ -60,7 +60,7 @@ All configuration is via environment variables in `.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ENGINE` | | Default engine: `codex` or `copilot` (default: `copilot`) |
+| `DEFAULT_ENGINE` | | Default engine: `codex` or `copilot` (default: `codex`) |
 | `CODEX_MODEL` | | Model name (default: `gpt-5.3-codex`) |
 | `CODEX_WORKING_DIR` | | Working directory (default: `~/codex-workspace`) |
 | `CODEX_BIN` | | Path to codex binary (auto-detected) |

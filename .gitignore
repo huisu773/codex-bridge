@@ -8,6 +8,7 @@ dist/
 # Environment & Secrets
 .env
 .env*.local
+.env.backup*
 *.pem
 *.key
 

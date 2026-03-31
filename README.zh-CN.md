@@ -60,7 +60,7 @@ npm start
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `ENGINE` | | 默认引擎：`codex` 或 `copilot`（默认：`copilot`） |
+| `DEFAULT_ENGINE` | | 默认引擎：`codex` 或 `copilot`（默认：`codex`） |
 | `CODEX_MODEL` | | 模型名称（默认：`gpt-5.3-codex`） |
 | `CODEX_WORKING_DIR` | | 工作目录（默认：`~/codex-workspace`） |
 | `CODEX_BIN` | | Codex 二进制路径（自动检测） |

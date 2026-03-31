@@ -1,11 +1,15 @@
 import { registerCommand } from "./registry.js";
-import { getOrCreateSession, updateSessionWorkingDir, updateSessionEngine } from "../core/session-manager.js";
+import { getOrCreateSession, updateSessionWorkingDir, updateSessionEngine, updateSessionModel } from "../core/session-manager.js";
 import { nowISO } from "../utils/helpers.js";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { config } from "../config.js";
 import { getEngine, setEngine, getEngineLabel, type EngineName } from "../engines/index.js";
+
+function defaultModelForEngine(engine: "codex" | "copilot"): string {
+  return engine === "copilot" ? config.copilot.model : config.codex.model;
+}
 
 export function registerCustomCommands(): void {
   // /exec — Execute a shell command directly
@@ -118,9 +122,9 @@ export function registerCustomCommands(): void {
       // Persist engine choice to session so it survives restarts
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
       updateSessionEngine(session, engine as "codex" | "copilot");
-      const modelInfo = engine === "copilot"
-        ? `Model: ${config.copilot.model}`
-        : `Model: ${config.codex.model}`;
+      // Keep per-engine default model isolated unless user explicitly switched model.
+      updateSessionModel(session, defaultModelForEngine(engine as "codex" | "copilot"));
+      const modelInfo = `Model: ${session.model}`;
       await sendReply(`✅ Engine switched to **${engine}**\n${modelInfo}`);
     },
   });

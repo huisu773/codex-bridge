@@ -30,6 +30,10 @@ function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
+function defaultModelForEngine(engine: "codex" | "copilot"): string {
+  return engine === "copilot" ? config.copilot.model : config.codex.model;
+}
+
 /**
  * Session directory structure:
  *   {sessionDir}/
@@ -58,7 +62,7 @@ export function createSession(
     platform,
     chatId,
     userId,
-    model: config.codex.model,
+    model: defaultModelForEngine(config.engine),
     workingDir: config.codex.workingDir,
     isCustomWorkingDir: false,
     sessionDir: dir,
