@@ -29,10 +29,13 @@ export function registerSessionCommands(): void {
     description: "Start a new Codex session",
     usage: "/new",
     execute: async (msg, _args, sendReply) => {
+      const chatKey = `${msg.platform}:${msg.chatId}`;
+      const engine = getEngine(chatKey);
       deactivateSession(msg.platform, msg.chatId);
       const session = createSession(msg.platform, msg.chatId, msg.userId);
       await sendReply(
         `🆕 New session created: ${session.id}\n` +
+          `Engine: ${engine}\n` +
           `Model: ${session.model}\n` +
           `Working dir: ${session.workingDir}`,
       );
