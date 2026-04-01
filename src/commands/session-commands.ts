@@ -9,6 +9,7 @@ import {
   getOrCreateSession,
   deleteSession,
   deactivateSession,
+  activateSession,
   updateSessionModel,
   listAllSessions,
   appendConversation,
@@ -18,6 +19,7 @@ import {
   getExecutor,
   cancelAllEngines,
   getTotalRunningCount,
+  restoreEngineOverride,
 } from "../engines/index.js";
 import { nowISO } from "../utils/helpers.js";
 import { getServiceMetrics } from "../utils/metrics.js";
@@ -26,13 +28,19 @@ import { getCodexAccountInfo, getCopilotAccountInfo } from "./utils.js";
 export function registerSessionCommands(): void {
   registerCommand({
     name: "new",
-    description: "Start a new Codex session",
+    description: "Start a new session",
     usage: "/new",
     execute: async (msg, _args, sendReply) => {
       const chatKey = `${msg.platform}:${msg.chatId}`;
       const engine = getEngine(chatKey);
+      // Preserve current model selection across /new
+      const prevSession = getSession(msg.platform, msg.chatId);
+      const prevModel = prevSession?.model;
       deactivateSession(msg.platform, msg.chatId);
       const session = createSession(msg.platform, msg.chatId, msg.userId);
+      if (prevModel) {
+        updateSessionModel(session, prevModel);
+      }
       await sendReply(
         `🆕 New session created: ${session.id}\n` +
           `Engine: ${engine}\n` +
@@ -239,23 +247,63 @@ export function registerSessionCommands(): void {
 
   registerCommand({
     name: "resume",
-    description: "Show current session (sessions auto-resume by chat)",
-    usage: "/resume",
-    execute: async (msg, _args, sendReply) => {
-      const session = getSession(msg.platform, msg.chatId);
-      if (session) {
+    description: "Resume a previous session by ID, or show recent sessions",
+    usage: "/resume [session_id]",
+    execute: async (msg, args, sendReply) => {
+      if (args) {
+        // Resume a specific session by ID
+        const targetId = args.trim();
+        const allSessions = listAllSessions();
+        const target = allSessions.find((s) => s.id === targetId);
+        if (!target) {
+          await sendReply(`❌ Session not found: ${targetId}\nUse \`/resume\` to list recent sessions.`);
+          return;
+        }
+        // Deactivate current session first
+        deactivateSession(msg.platform, msg.chatId);
+        // Re-activate the target session for this chat
+        target.chatId = msg.chatId;
+        target.platform = msg.platform;
+        target.updatedAt = nowISO();
+        // Persist updated meta and set as active in-memory
+        activateSession(target);
+
         const chatKey = `${msg.platform}:${msg.chatId}`;
+        if (target.engine) {
+          restoreEngineOverride(chatKey, target.engine);
+        }
         const engine = getEngine(chatKey);
         const threadInfo = engine === "copilot"
-          ? `🔗 Engine: copilot\n🔗 Copilot session: ${session.copilotSessionId || "none (new session on next message)"}`
-          : `🔗 Engine: codex\n🔗 Codex thread: ${session.codexSessionId || "none (will be created on next message)"}`;
+          ? `🔗 Copilot session: ${target.copilotSessionId || "none"}`
+          : `🔗 Codex thread: ${target.codexSessionId || "none"}`;
         await sendReply(
-          `♻️ Active session: ${session.id}\nMessages: ${session.messageCount}\nModel: ${session.model}\n${threadInfo}`,
+          `♻️ Resumed session: ${target.id}\nMessages: ${target.messageCount}\nModel: ${target.model}\n${threadInfo}`,
         );
       } else {
-        await sendReply(
-          "ℹ️ No active session. Send a message to start one, or use /new.",
-        );
+        // Show last 5 sessions
+        const allSessions = listAllSessions();
+        if (allSessions.length === 0) {
+          await sendReply("📭 No sessions found.\nUse /new to start one.");
+          return;
+        }
+        // Sort by updatedAt descending
+        allSessions.sort((a, b) => {
+          const ta = Date.parse(a.updatedAt) || 0;
+          const tb = Date.parse(b.updatedAt) || 0;
+          return tb - ta;
+        });
+        const recent = allSessions.slice(0, 5);
+        const currentSession = getSession(msg.platform, msg.chatId);
+        const lines = [
+          "📂 **Recent Sessions** (last 5)\n",
+          ...recent.map((s) => {
+            const active = currentSession && currentSession.id === s.id ? " ✅ active" : "";
+            return `• \`${s.id}\`${active}\n  msgs: ${s.messageCount} | model: ${s.model}\n  updated: ${s.updatedAt}`;
+          }),
+          "",
+          "💡 Use `/resume <session_id>` to resume a specific session.",
+        ];
+        await sendReply(lines.join("\n"));
       }
     },
   });

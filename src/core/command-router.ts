@@ -12,6 +12,9 @@ export function parseCommand(text: string): ParsedCommand | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;
 
+  // Treat sequences like "---" as plain text, not commands
+  if (/^\/[-]+/.test(trimmed)) return null;
+
   const spaceIdx = trimmed.indexOf(" ");
   if (spaceIdx === -1) {
     return { command: trimmed.slice(1).toLowerCase(), args: "", raw: trimmed };

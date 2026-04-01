@@ -27,6 +27,26 @@ function defaultModelForEngine(engine: "codex" | "copilot"): string {
 }
 
 export function registerCustomCommands(): void {
+  // /reload — Restart codex-bridge service
+  registerCommand({
+    name: "reload",
+    aliases: ["restart"],
+    description: "Restart the codex-bridge service",
+    usage: "/reload",
+    execute: async (_msg, _args, sendReply) => {
+      await sendReply("🔄 Restarting codex-bridge service...");
+      // Small delay to let the reply send before the process dies
+      setTimeout(() => {
+        try {
+          execSync("systemctl restart codex-bridge", { timeout: 5_000 });
+        } catch {
+          // If systemctl fails, fall back to self-exit (systemd will restart)
+          process.exit(0);
+        }
+      }, 1000);
+    },
+  });
+
   // /exec — Execute a safe, read-only shell command
   registerCommand({
     name: "exec",
@@ -115,6 +135,7 @@ export function registerCustomCommands(): void {
         `Working dir: ${session.workingDir}`,
         `Session dir: ${config.session.dir}`,
         `Codex binary: ${config.codex.bin}`,
+        `Copilot binary: ${config.copilot.bin}`,
         `Rate limit: ${config.security.rateLimitPerMinute}/min`,
         `Session max age: ${config.session.maxAgeHours}h`,
         `Webhook port: ${config.webhook.port}`,

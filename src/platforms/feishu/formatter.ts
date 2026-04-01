@@ -3,6 +3,64 @@ import { splitMessage } from "../../utils/helpers.js";
 const FEISHU_MAX_LEN = 30000;
 
 /**
+ * Parse a markdown table into header + rows arrays.
+ * Returns null if the text is not a valid markdown table.
+ */
+function parseMarkdownTable(tableText: string): { headers: string[]; rows: string[][] } | null {
+  const lines = tableText.trim().split("\n").map((l) => l.trim());
+  if (lines.length < 2) return null;
+
+  const parseRow = (line: string): string[] => {
+    // Remove leading/trailing pipes then split
+    let trimmed = line;
+    if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+    return trimmed.split("|").map((cell) => cell.trim());
+  };
+
+  const headers = parseRow(lines[0]);
+  // Validate separator line (e.g., |---|---|)
+  const sep = lines[1];
+  if (!/^[|\s:-]+$/.test(sep)) return null;
+
+  const rows: string[][] = [];
+  for (let i = 2; i < lines.length; i++) {
+    if (!lines[i]) continue;
+    rows.push(parseRow(lines[i]));
+  }
+
+  return { headers, rows };
+}
+
+/**
+ * Build a Feishu card table element from parsed table data.
+ * Uses the "table" tag supported by Feishu card v2.
+ */
+function buildCardTableElement(headers: string[], rows: string[][]): any {
+  const columns = headers.map((h, i) => ({
+    name: `col_${i}`,
+    display_name: h,
+    data_type: "text",
+    width: "auto",
+  }));
+
+  const tableRows = rows.map((row) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((_h, i) => {
+      obj[`col_${i}`] = row[i] ?? "";
+    });
+    return obj;
+  });
+
+  return {
+    tag: "table",
+    page_size: rows.length,
+    columns,
+    rows: tableRows,
+  };
+}
+
+/**
  * Convert standard markdown to Feishu lark_md format.
  * lark_md supports: **bold**, *italic*, ~~strike~~, [link](url),
  * `inline code`, and ``` code blocks.
@@ -52,6 +110,51 @@ export function markdownToLarkMd(text: string): string {
   return result;
 }
 
+/**
+ * Extract markdown tables from text and return card elements.
+ * Tables are replaced with placeholders; the caller assembles elements.
+ */
+export function splitTextAndTables(text: string): Array<{ type: "text"; content: string } | { type: "table"; headers: string[]; rows: string[][] }> {
+  const parts: Array<{ type: "text"; content: string } | { type: "table"; headers: string[]; rows: string[][] }> = [];
+
+  // Regex to match markdown tables (header + separator + data rows)
+  const tableRegex = /(?:^|\n)((?:\|[^\n]+\|\s*\n)\|[-:\s|]+\|\s*\n(?:\|[^\n]+\|\s*\n?)+)/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tableRegex.exec(text)) !== null) {
+    const tableStart = match.index + (text[match.index] === "\n" ? 1 : 0);
+    // Push preceding text
+    if (tableStart > lastIndex) {
+      const before = text.slice(lastIndex, tableStart).trim();
+      if (before) parts.push({ type: "text", content: before });
+    }
+
+    const parsed = parseMarkdownTable(match[1]);
+    if (parsed) {
+      parts.push({ type: "table", headers: parsed.headers, rows: parsed.rows });
+    } else {
+      // Fallback: treat as text
+      parts.push({ type: "text", content: match[1].trim() });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text after last table
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) parts.push({ type: "text", content: remaining });
+  }
+
+  // No tables found — return single text part
+  if (parts.length === 0 && text.trim()) {
+    parts.push({ type: "text", content: text });
+  }
+
+  return parts;
+}
+
 export function formatFeishuReply(text: string): string[] {
   return splitMessage(text, FEISHU_MAX_LEN);
 }
@@ -67,27 +170,46 @@ export function buildFeishuTextContent(text: string): object {
 /**
  * Build a Feishu interactive card message.
  * Cards support lark_md (markdown-like) formatting natively.
+ * Markdown tables are converted to native Feishu card table elements.
  */
 export function buildFeishuCard(text: string, title?: string, color?: string): object {
-  // Feishu lark_md supports: **bold**, *italic*, ~~strike~~, [link](url),
-  // `inline code`, and code blocks via markdown fence
   const elements: any[] = [];
 
-  // Convert standard markdown to lark_md compatible format
-  let larkText = markdownToLarkMd(text);
+  const parts = splitTextAndTables(text);
+  const hasTables = parts.some((p) => p.type === "table");
 
-  // Split text into chunks that fit card element limits (~30k chars)
-  if (larkText.length > FEISHU_MAX_LEN) {
-    larkText = larkText.slice(0, FEISHU_MAX_LEN - 10) + "\n...";
+  if (hasTables) {
+    for (const part of parts) {
+      if (part.type === "table") {
+        elements.push(buildCardTableElement(part.headers, part.rows));
+      } else {
+        let larkText = markdownToLarkMd(part.content);
+        if (larkText.length > FEISHU_MAX_LEN) {
+          larkText = larkText.slice(0, FEISHU_MAX_LEN - 10) + "\n...";
+        }
+        elements.push({
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: larkText,
+          },
+        });
+      }
+    }
+  } else {
+    // No tables — original behavior
+    let larkText = markdownToLarkMd(text);
+    if (larkText.length > FEISHU_MAX_LEN) {
+      larkText = larkText.slice(0, FEISHU_MAX_LEN - 10) + "\n...";
+    }
+    elements.push({
+      tag: "div",
+      text: {
+        tag: "lark_md",
+        content: larkText,
+      },
+    });
   }
-
-  elements.push({
-    tag: "div",
-    text: {
-      tag: "lark_md",
-      content: larkText,
-    },
-  });
 
   const card: any = {
     config: {
@@ -119,13 +241,42 @@ export function buildFeishuStreamCard(text: string, isComplete = false): object 
   const elements: any[] = [];
 
   if (text) {
-    elements.push({
-      tag: "div",
-      text: {
-        tag: "lark_md",
-        content: markdownToLarkMd(text),
-      },
-    });
+    // For streaming cards, also handle tables in the final render
+    if (isComplete) {
+      const parts = splitTextAndTables(text);
+      const hasTables = parts.some((p) => p.type === "table");
+      if (hasTables) {
+        for (const part of parts) {
+          if (part.type === "table") {
+            elements.push(buildCardTableElement(part.headers, part.rows));
+          } else {
+            elements.push({
+              tag: "div",
+              text: {
+                tag: "lark_md",
+                content: markdownToLarkMd(part.content),
+              },
+            });
+          }
+        }
+      } else {
+        elements.push({
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: markdownToLarkMd(text),
+          },
+        });
+      }
+    } else {
+      elements.push({
+        tag: "div",
+        text: {
+          tag: "lark_md",
+          content: markdownToLarkMd(text),
+        },
+      });
+    }
   }
 
   if (!isComplete) {

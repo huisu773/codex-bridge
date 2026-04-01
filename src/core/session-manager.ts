@@ -152,6 +152,16 @@ export function deactivateSession(
   return true;
 }
 
+/**
+ * Activate (or re-activate) a session, placing it into the in-memory index
+ * and persisting updated metadata to disk.
+ */
+export function activateSession(session: Session): void {
+  activeSessions.set(chatKey(session.platform, session.chatId), session);
+  saveMeta(session);
+  logger.info({ sessionId: session.id }, "Session activated");
+}
+
 export function updateSessionModel(
   session: Session,
   model: string,
