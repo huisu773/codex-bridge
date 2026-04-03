@@ -1,6 +1,23 @@
 import dotenv from "dotenv";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
-// Load .env with override=true so project .env always takes priority
+const HOME = process.env.HOME || "/root";
+
+// Load Claude Code env from ~/.claude-env if present (auth, base URL, model overrides).
+// Uses override:false so it fills in missing vars without clobbering anything already set.
+const claudeEnvPath = resolve(HOME, ".claude-env");
+if (existsSync(claudeEnvPath)) {
+  dotenv.config({ path: claudeEnvPath, override: false });
+}
+
+// Ensure npm-global bin is on PATH so `claude` binary is found in any context (systemd, cron, etc.)
+const npmGlobalBin = resolve(HOME, ".npm-global/bin");
+if (!process.env.PATH?.includes(npmGlobalBin)) {
+  process.env.PATH = `${npmGlobalBin}:${process.env.PATH || ""}`;
+}
+
+// Load project .env with override=true so project settings always take priority
 // over system environment variables (prevents token confusion with other bots)
 dotenv.config({ override: true });
 
@@ -153,7 +170,7 @@ export function loadConfig(): Config {
       staleProcessMs: validatePositiveInt(Number(optional("COPILOT_STALE_PROCESS_MS", "3600000")), "COPILOT_STALE_PROCESS_MS"),
     },
     claude: {
-      bin: optional("CLAUDE_BIN", "/root/.npm-global/bin/claude"),
+      bin: optional("CLAUDE_BIN", "claude"),
       model: optional("CLAUDE_MODEL", "qwen/qwen3.6-plus:free"),
       timeoutMs: validateTimeout(Number(optional("CLAUDE_TIMEOUT_MS", "600000")), "CLAUDE_TIMEOUT_MS"),
       staleProcessMs: validatePositiveInt(Number(optional("CLAUDE_STALE_PROCESS_MS", "3600000")), "CLAUDE_STALE_PROCESS_MS"),

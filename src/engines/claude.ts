@@ -77,12 +77,19 @@ async function executeClaudeOnce(opts: EngineExecOptions): Promise<EngineExecRes
   const startTime = Date.now();
   const execId = randomUUID().slice(0, 8);
 
-  if (!existsSync(config.claude.bin)) {
-    return {
-      success: false,
-      output: `❌ Claude Code CLI not found at ${config.claude.bin}. Install with: npm install -g @anthropic-ai/claude-code`,
-      exitCode: 1, durationMs: 0, timedOut: false, newFiles: [],
-    };
+  // Resolve binary: if not an absolute path, search PATH
+  let claudeBin = config.claude.bin;
+  if (!existsSync(claudeBin)) {
+    try {
+      const { execFileSync } = await import("node:child_process");
+      claudeBin = execFileSync("which", [claudeBin], { encoding: "utf-8" }).trim();
+    } catch {
+      return {
+        success: false,
+        output: `❌ Claude Code CLI not found at ${config.claude.bin}. Install with: npm install -g @anthropic-ai/claude-code`,
+        exitCode: 1, durationMs: 0, timedOut: false, newFiles: [],
+      };
+    }
   }
 
   const beforeSnap = await snapshotDir(workDir);
@@ -114,7 +121,7 @@ async function executeClaudeOnce(opts: EngineExecOptions): Promise<EngineExecRes
     let totalOutputTokens = 0;
     let totalCachedTokens = 0;
 
-    const proc = spawn(config.claude.bin, args, {
+    const proc = spawn(claudeBin, args, {
       cwd: workDir,
       env: buildClaudeEnv(),
       stdio: ["pipe", "pipe", "pipe"],

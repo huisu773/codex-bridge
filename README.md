@@ -95,12 +95,12 @@ All configuration is via environment variables in `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLAUDE_BIN` | `/root/.npm-global/bin/claude` | Path to Claude Code CLI binary |
-| `CLAUDE_MODEL` | `qwen/qwen3.6-plus:free` | Default model (via OpenRouter) |
-| `CLAUDE_PROVIDER` | `openrouter` | API provider: `openrouter` or `anthropic` |
-| `OPENROUTER_API_KEY` | | OpenRouter API key (required for openrouter provider) |
-| `CLAUDE_BASE_URL` | `https://openrouter.ai/api` | API base URL |
+| `CLAUDE_BIN` | `claude` | Claude Code CLI binary (auto-detected via PATH) |
+| `CLAUDE_MODEL` | `qwen/qwen3.6-plus:free` | Default model |
 | `CLAUDE_TIMEOUT_MS` | `600000` | Max execution time (10 min) |
+
+> **Provider auth** (OpenRouter, Anthropic, etc.) is configured in the system environment (`~/.bashrc` or `~/.claude-env`), not in `.env`.
+> See the [OpenRouter integration guide](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration) for setup instructions.
 
 ### Platform Credentials
 

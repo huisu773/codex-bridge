@@ -95,12 +95,12 @@ npm start
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `CLAUDE_BIN` | `claude` | Claude Code CLI 二进制路径 |
+| `CLAUDE_BIN` | `claude` | Claude Code CLI 二进制路径（通过 PATH 自动检测） |
 | `CLAUDE_MODEL` | `qwen/qwen3.6-plus:free` | Claude 默认模型 |
 | `CLAUDE_TIMEOUT_MS` | `600000` | 最大执行时间（10 分钟） |
-| `CLAUDE_PROVIDER` | `openrouter` | API 提供商（`anthropic` / `openrouter`） |
-| `CLAUDE_API_KEY` | | API Key（如不设置则使用 `OPENROUTER_API_KEY`） |
-| `CLAUDE_BASE_URL` | `https://openrouter.ai/api` | API 基础 URL |
+
+> **Provider 认证**（OpenRouter、Anthropic 等）通过系统环境（`~/.bashrc` 或 `~/.claude-env`）配置，不在 `.env` 中设置。
+> 参阅 [OpenRouter 集成指南](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration) 了解配置方法。
 
 ### 平台凭证
 
