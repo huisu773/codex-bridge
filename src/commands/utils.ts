@@ -170,3 +170,39 @@ export function getCopilotAccountInfo(): Record<string, string> {
   }
   return info;
 }
+
+/** Parse Claude Code CLI account/runtime info (best effort). */
+export function getClaudeAccountInfo(): Record<string, string> {
+  const info: Record<string, string> = {};
+  try {
+    info.bin = config.claude.bin;
+    info.binStatus = existsSync(config.claude.bin) ? "✅ Found" : "❌ Not found";
+    info.provider = config.claude.provider;
+    info.model = config.claude.model;
+    info.baseUrl = config.claude.baseUrl;
+    info.apiKeyStatus = config.claude.apiKey ? "✅ Configured" : "❌ Not set (need OPENROUTER_API_KEY)";
+
+    try {
+      const version = execFileSync(config.claude.bin, ["--version"], {
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+      if (version) info.version = version;
+    } catch {
+      // Ignore version probe failures
+    }
+
+    // Check Claude config file
+    const HOME = process.env.HOME || "/root";
+    const claudeConfigPath = `${HOME}/.claude.json`;
+    if (existsSync(claudeConfigPath)) {
+      try {
+        const claudeConfig = JSON.parse(readFileSync(claudeConfigPath, "utf-8"));
+        if (claudeConfig.installMethod) info.installMethod = claudeConfig.installMethod;
+      } catch { /* ignore */ }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return info;
+}

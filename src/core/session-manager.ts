@@ -42,8 +42,10 @@ function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
-function defaultModelForEngine(engine: "codex" | "copilot"): string {
-  return engine === "copilot" ? config.copilot.model : config.codex.model;
+function defaultModelForEngine(engine: "codex" | "copilot" | "claude"): string {
+  if (engine === "copilot") return config.copilot.model;
+  if (engine === "claude") return config.claude.model;
+  return config.codex.model;
 }
 
 /**
@@ -191,7 +193,7 @@ export function updateCodexSessionId(
 
 export function updateSessionEngine(
   session: Session,
-  engine: "codex" | "copilot",
+  engine: "codex" | "copilot" | "claude",
 ): void {
   session.engine = engine;
   session.updatedAt = nowISO();
@@ -203,6 +205,15 @@ export function updateCopilotSessionId(
   copilotSessionId: string,
 ): void {
   session.copilotSessionId = copilotSessionId;
+  session.updatedAt = nowISO();
+  saveMeta(session);
+}
+
+export function updateClaudeSessionId(
+  session: Session,
+  claudeSessionId: string,
+): void {
+  session.claudeSessionId = claudeSessionId;
   session.updatedAt = nowISO();
   saveMeta(session);
 }
@@ -219,8 +230,8 @@ export function appendConversation(
     JSON.stringify(entry) + "\n",
   );
   // Human-readable text log
-  const metadata = entry.metadata as { engine?: "codex" | "copilot" } | undefined;
-  const assistantLabel = metadata?.engine === "copilot" ? "🤖 Copilot" : "🤖 Codex";
+  const metadata = entry.metadata as { engine?: "codex" | "copilot" | "claude" } | undefined;
+  const assistantLabel = metadata?.engine === "copilot" ? "🤖 Copilot" : metadata?.engine === "claude" ? "🤖 Claude" : "🤖 Codex";
   const roleLabel = entry.role === "user" ? "👤 You" : entry.role === "assistant" ? assistantLabel : "⚙️ System";
   const filesNote = entry.files?.length ? `\n[Files: ${entry.files.join(", ")}]` : "";
   appendFileSync(

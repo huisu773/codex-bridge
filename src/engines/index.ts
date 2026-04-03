@@ -8,6 +8,7 @@
 import { config } from "../config.js";
 import { codexEngine } from "./codex.js";
 import { copilotEngine } from "./copilot.js";
+import { claudeEngine } from "./claude.js";
 import type { EngineName, EngineExecutor, EngineExecOptions, EngineExecResult } from "./types.js";
 
 export type { EngineName, EngineExecOptions, EngineExecResult, EngineExecutor } from "./types.js";
@@ -47,6 +48,7 @@ export function restoreEngineOverride(chatKey: string, engine: EngineName): void
 const engines: Record<EngineName, EngineExecutor> = {
   codex: codexEngine,
   copilot: copilotEngine,
+  claude: claudeEngine,
 };
 
 /** Get the executor for a given engine name. */
@@ -64,14 +66,15 @@ export async function executeForChat(
 }
 
 /** Cancel all running tasks across all engines. Returns total cancelled. */
-export function cancelAllEngines(): { codex: number; copilot: number } {
+export function cancelAllEngines(): { codex: number; copilot: number; claude: number } {
   return {
     codex: codexEngine.cancelAll(),
     copilot: copilotEngine.cancelAll(),
+    claude: claudeEngine.cancelAll(),
   };
 }
 
 /** Get total running task count across all engines. */
 export function getTotalRunningCount(): number {
-  return codexEngine.getRunningCount() + copilotEngine.getRunningCount();
+  return codexEngine.getRunningCount() + copilotEngine.getRunningCount() + claudeEngine.getRunningCount();
 }

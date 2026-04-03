@@ -31,6 +31,9 @@ async function main() {
     engine: config.engine,
     copilotBin: config.copilot.bin,
     copilotModel: config.copilot.model,
+    claudeBin: config.claude.bin,
+    claudeModel: config.claude.model,
+    claudeProvider: config.claude.provider,
   }, "Configuration loaded");
 
   // Load existing sessions
@@ -76,9 +79,9 @@ function shutdown(signal: string) {
   forceTimer.unref();
 
   try {
-    const { codex, copilot } = cancelAllEngines();
-    const totalCancelled = codex + copilot;
-    if (totalCancelled > 0) logger.info({ codex, copilot }, "Cancelled running tasks");
+    const { codex, copilot, claude } = cancelAllEngines();
+    const totalCancelled = codex + copilot + claude;
+    if (totalCancelled > 0) logger.info({ codex, copilot, claude }, "Cancelled running tasks");
     stopTelegramBot();
     stopFeishuBot();
   } catch (err) {

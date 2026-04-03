@@ -5,7 +5,7 @@
  * callers (commands, passthrough handler) can be engine-agnostic.
  */
 
-export type EngineName = "codex" | "copilot";
+export type EngineName = "codex" | "copilot" | "claude";
 
 /** Options shared by all engine executors. */
 export interface EngineExecOptions {

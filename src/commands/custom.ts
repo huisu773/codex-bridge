@@ -22,8 +22,10 @@ function isExecAllowed(cmd: string): boolean {
   );
 }
 
-function defaultModelForEngine(engine: "codex" | "copilot"): string {
-  return engine === "copilot" ? config.copilot.model : config.codex.model;
+function defaultModelForEngine(engine: "codex" | "copilot" | "claude"): string {
+  if (engine === "copilot") return config.copilot.model;
+  if (engine === "claude") return config.claude.model;
+  return config.codex.model;
 }
 
 export function registerCustomCommands(): void {
@@ -136,6 +138,8 @@ export function registerCustomCommands(): void {
         `Session dir: ${config.session.dir}`,
         `Codex binary: ${config.codex.bin}`,
         `Copilot binary: ${config.copilot.bin}`,
+        `Claude binary: ${config.claude.bin}`,
+        `Claude provider: ${config.claude.provider}`,
         `Rate limit: ${config.security.rateLimitPerMinute}/min`,
         `Session max age: ${config.session.maxAgeHours}h`,
         `Webhook port: ${config.webhook.port}`,
@@ -148,8 +152,8 @@ export function registerCustomCommands(): void {
   registerCommand({
     name: "engine",
     aliases: ["backend"],
-    description: "Switch between Codex and Copilot CLI backends",
-    usage: "/engine [codex|copilot]",
+    description: "Switch between Codex, Copilot, and Claude CLI backends",
+    usage: "/engine [codex|copilot|claude]",
     execute: async (msg, args, sendReply) => {
       const chatKey = `${msg.platform}:${msg.chatId}`;
 
@@ -161,25 +165,24 @@ export function registerCustomCommands(): void {
           "Available engines:",
           "  • `codex` — OpenAI Codex CLI (multi-turn via thread ID)",
           "  • `copilot` — GitHub Copilot CLI (PTY + ask_user, single request)",
+          "  • `claude` — Claude Code CLI (OpenRouter, multi-turn resume)",
           "",
-          "Switch: `/engine copilot` or `/engine codex`",
+          "Switch: `/engine copilot` or `/engine codex` or `/engine claude`",
         ];
         await sendReply(lines.join("\n"));
         return;
       }
 
       const engine = args.trim().toLowerCase();
-      if (engine !== "codex" && engine !== "copilot") {
-        await sendReply("❌ Invalid engine. Use `codex` or `copilot`.");
+      if (engine !== "codex" && engine !== "copilot" && engine !== "claude") {
+        await sendReply("❌ Invalid engine. Use `codex`, `copilot`, or `claude`.");
         return;
       }
 
       setEngine(chatKey, engine as EngineName);
-      // Persist engine choice to session so it survives restarts
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
-      updateSessionEngine(session, engine as "codex" | "copilot");
-      // Keep per-engine default model isolated unless user explicitly switched model.
-      updateSessionModel(session, defaultModelForEngine(engine as "codex" | "copilot"));
+      updateSessionEngine(session, engine as "codex" | "copilot" | "claude");
+      updateSessionModel(session, defaultModelForEngine(engine as "codex" | "copilot" | "claude"));
       const modelInfo = `Model: ${session.model}`;
       await sendReply(`✅ Engine switched to **${engine}**\n${modelInfo}`);
     },

@@ -18,3 +18,11 @@ export const COPILOT_MODELS: EngineModelInfo[] = [
   { id: "gemini-3.1-pro", description: "Gemini 3.1 Pro" },
   { id: "gemini-3-flash", description: "Gemini 3 Flash" },
 ];
+
+export const CLAUDE_MODELS: EngineModelInfo[] = [
+  { id: "qwen/qwen3.6-plus:free", description: "Qwen 3.6 Plus — free via OpenRouter", recommended: true },
+  { id: "minimax/minimax-m2.7", description: "MiniMax M2.7 — via OpenRouter" },
+  { id: "sonnet", description: "Claude Sonnet — latest balanced" },
+  { id: "opus", description: "Claude Opus — deep reasoning" },
+  { id: "haiku", description: "Claude Haiku — fast & light" },
+];

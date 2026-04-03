@@ -9,6 +9,7 @@ import {
   getOrCreateSession,
   updateCodexSessionId,
   updateCopilotSessionId,
+  updateClaudeSessionId,
   appendConversation,
   saveGeneratedFile,
   consumePendingFiles,
@@ -86,6 +87,8 @@ export function registerPassthroughCommand(): void {
 
           const resumeSessionId = engine === "copilot"
             ? session.copilotSessionId || undefined
+            : engine === "claude"
+            ? session.claudeSessionId || undefined
             : session.codexSessionId || undefined;
 
           const result = await executor.execute({
@@ -120,6 +123,8 @@ export function registerPassthroughCommand(): void {
           if (result.sessionId) {
             if (engine === "copilot" && result.sessionId !== session.copilotSessionId) {
               updateCopilotSessionId(session, result.sessionId);
+            } else if (engine === "claude" && result.sessionId !== session.claudeSessionId) {
+              updateClaudeSessionId(session, result.sessionId);
             } else if (engine === "codex" && result.sessionId !== session.codexSessionId) {
               updateCodexSessionId(session, result.sessionId);
             }
@@ -157,7 +162,7 @@ export function registerPassthroughCommand(): void {
           } else if (streamMsgId && !result.output) {
             const statusMsg = result.success
               ? "✅ Done (no output)."
-              : `❌ ${engine === "copilot" ? "Copilot" : "Codex"} exited with code ${result.exitCode}.`;
+              : `❌ ${engine === "copilot" ? "Copilot" : engine === "claude" ? "Claude" : "Codex"} exited with code ${result.exitCode}.`;
             const finalize = msg.finalizeStream || msg.updateStream;
             if (finalize) {
               await finalize(streamMsgId, statusMsg).catch(() => {});
@@ -169,7 +174,7 @@ export function registerPassthroughCommand(): void {
           } else {
             const statusMsg = result.success
               ? "✅ Done (no output)."
-              : `❌ ${engine === "copilot" ? "Copilot" : "Codex"} exited with code ${result.exitCode}.`;
+              : `❌ ${engine === "copilot" ? "Copilot" : engine === "claude" ? "Claude" : "Codex"} exited with code ${result.exitCode}.`;
             await sendReply(statusMsg);
           }
 

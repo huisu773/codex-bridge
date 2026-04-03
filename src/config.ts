@@ -36,7 +36,16 @@ export interface Config {
     instructions: string;
     staleProcessMs: number;
   };
-  engine: "codex" | "copilot";
+  claude: {
+    bin: string;
+    model: string;
+    timeoutMs: number;
+    staleProcessMs: number;
+    provider: string;
+    apiKey: string;
+    baseUrl: string;
+  };
+  engine: "codex" | "copilot" | "claude";
   session: {
     dir: string;
     maxAgeHours: number;
@@ -111,8 +120,8 @@ function validateTimeout(val: number, key: string): number {
 export function loadConfig(): Config {
   const HOME = process.env.HOME || "/root";
     const engineVal = optional("DEFAULT_ENGINE", "codex");
-    if (engineVal !== "codex" && engineVal !== "copilot") {
-      throw new Error(`Invalid DEFAULT_ENGINE: ${engineVal} (must be "codex" or "copilot")`);
+    if (engineVal !== "codex" && engineVal !== "copilot" && engineVal !== "claude") {
+      throw new Error(`Invalid DEFAULT_ENGINE: ${engineVal} (must be "codex", "copilot", or "claude")`);
     }
     return {
     telegram: {
@@ -146,7 +155,16 @@ export function loadConfig(): Config {
       instructions: optional("COPILOT_INSTRUCTIONS", ""),
       staleProcessMs: validatePositiveInt(Number(optional("COPILOT_STALE_PROCESS_MS", "3600000")), "COPILOT_STALE_PROCESS_MS"),
     },
-    engine: engineVal as "codex" | "copilot",
+    claude: {
+      bin: optional("CLAUDE_BIN", "/root/.npm-global/bin/claude"),
+      model: optional("CLAUDE_MODEL", "qwen/qwen3.6-plus:free"),
+      timeoutMs: validateTimeout(Number(optional("CLAUDE_TIMEOUT_MS", "600000")), "CLAUDE_TIMEOUT_MS"),
+      staleProcessMs: validatePositiveInt(Number(optional("CLAUDE_STALE_PROCESS_MS", "3600000")), "CLAUDE_STALE_PROCESS_MS"),
+      provider: optional("CLAUDE_PROVIDER", "openrouter"),
+      apiKey: optional("OPENROUTER_API_KEY", ""),
+      baseUrl: optional("CLAUDE_BASE_URL", "https://openrouter.ai/api"),
+    },
+    engine: engineVal as "codex" | "copilot" | "claude",
     session: {
       dir: resolvePath(optional("SESSION_DIR", `${HOME}/codex-workspace/sessions`)),
       maxAgeHours: validatePositiveInt(Number(optional("SESSION_MAX_AGE_HOURS", "168")), "SESSION_MAX_AGE_HOURS"),

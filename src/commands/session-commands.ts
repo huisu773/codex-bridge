@@ -23,7 +23,7 @@ import {
 } from "../engines/index.js";
 import { nowISO } from "../utils/helpers.js";
 import { getServiceMetrics } from "../utils/metrics.js";
-import { getCodexAccountInfo, getCopilotAccountInfo } from "./utils.js";
+import { getCodexAccountInfo, getCopilotAccountInfo, getClaudeAccountInfo } from "./utils.js";
 
 export function registerSessionCommands(): void {
   registerCommand({
@@ -61,6 +61,7 @@ export function registerSessionCommands(): void {
       const allSessions = listAllSessions();
       const account = getCodexAccountInfo();
       const copilotAccount = getCopilotAccountInfo();
+      const claudeAccount = getClaudeAccountInfo();
       const metrics = getServiceMetrics(totalRunning);
       const chatKey = `${msg.platform}:${msg.chatId}`;
       const engine = getEngine(chatKey);
@@ -75,6 +76,8 @@ export function registerSessionCommands(): void {
             `📁 Session: ${session.sessionDir || "N/A"}`,
             engine === "copilot"
               ? `🔗 Copilot session: ${session.copilotSessionId || "none"}`
+              : engine === "claude"
+              ? `🔗 Claude session: ${session.claudeSessionId || "none"}`
               : `🔗 Codex thread: ${session.codexSessionId || "none"}`,
             `📊 Tokens used: ${session.stats.totalTokensUsed}`,
           ].join("\n")
@@ -92,6 +95,9 @@ export function registerSessionCommands(): void {
         metrics.copilot.total > 0
           ? `Copilot: ${metrics.copilot.total} runs (${metrics.copilot.success} ok, ${metrics.copilot.failed} fail), avg ${metrics.copilot.avgDurationMs}ms, ${metrics.copilot.totalAskUserRounds} ask_user rounds`
           : "Copilot: no runs yet",
+        metrics.claude.total > 0
+          ? `Claude: ${metrics.claude.total} runs (${metrics.claude.success} ok, ${metrics.claude.failed} fail), avg ${metrics.claude.avgDurationMs}ms`
+          : "Claude: no runs yet",
         `Running: ${totalRunning} task(s)`,
         "",
         "— Session —",
@@ -103,6 +109,8 @@ export function registerSessionCommands(): void {
         account.subscriptionStatus ? `Codex Sub: ${account.subscriptionStatus}` : "",
         copilotAccount.user ? `Copilot User: ${copilotAccount.user}` : "",
         copilotAccount.tokenStatus ? `Copilot Token: ${copilotAccount.tokenStatus}` : "",
+        claudeAccount.version ? `Claude Version: ${claudeAccount.version}` : "",
+        claudeAccount.provider ? `Claude Provider: ${claudeAccount.provider}` : "",
       ].filter(Boolean);
 
       await sendReply(lines.join("\n"));
@@ -168,6 +176,8 @@ export function registerSessionCommands(): void {
       const executor = getExecutor(engine);
       const resumeSessionId = engine === "copilot"
         ? session.copilotSessionId || undefined
+        : engine === "claude"
+        ? session.claudeSessionId || undefined
         : session.codexSessionId || undefined;
 
       const result = await executor.execute({
@@ -208,7 +218,7 @@ export function registerSessionCommands(): void {
           (s) => {
             const stats = s.stats || { totalGeneratedFiles: 0, totalReceivedFiles: 0, totalTokensUsed: 0 };
             const engineLabel = s.engine || "default";
-            return `• ${s.id} | ${s.platform} | engine: ${engineLabel} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  🔗 codex: ${s.codexSessionId || "none"} | copilot: ${s.copilotSessionId || "none"}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received | tokens: ${stats.totalTokensUsed}\n  created: ${s.createdAt}`;
+            return `• ${s.id} | ${s.platform} | engine: ${engineLabel} | msgs: ${s.messageCount}\n  model: ${s.model}\n  📁 ${s.sessionDir}\n  🔗 codex: ${s.codexSessionId || "none"} | copilot: ${s.copilotSessionId || "none"} | claude: ${s.claudeSessionId || "none"}\n  files: ${stats.totalGeneratedFiles} generated, ${stats.totalReceivedFiles} received | tokens: ${stats.totalTokensUsed}\n  created: ${s.createdAt}`;
           },
         ),
       ];
@@ -221,8 +231,8 @@ export function registerSessionCommands(): void {
     description: "Cancel all running tasks",
     usage: "/cancel",
     execute: async (_msg, _args, sendReply) => {
-      const { codex, copilot } = cancelAllEngines();
-      const total = codex + copilot;
+      const { codex, copilot, claude } = cancelAllEngines();
+      const total = codex + copilot + claude;
       await sendReply(
         total > 0
           ? `🛑 Cancelled ${total} running task(s).`
@@ -275,6 +285,8 @@ export function registerSessionCommands(): void {
         const engine = getEngine(chatKey);
         const threadInfo = engine === "copilot"
           ? `🔗 Copilot session: ${target.copilotSessionId || "none"}`
+          : engine === "claude"
+          ? `🔗 Claude session: ${target.claudeSessionId || "none"}`
           : `🔗 Codex thread: ${target.codexSessionId || "none"}`;
         await sendReply(
           `♻️ Resumed session: ${target.id}\nMessages: ${target.messageCount}\nModel: ${target.model}\n${threadInfo}`,
