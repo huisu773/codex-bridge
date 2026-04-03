@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/codex-workspace/codex-bridge
-ExecStart=/usr/bin/node /root/codex-workspace/codex-bridge/dist/index.js
+ExecStart=/bin/bash -lc 'exec /usr/bin/node /root/codex-workspace/codex-bridge/dist/index.js'
 Environment=NODE_ENV=production
 EnvironmentFile=/root/codex-workspace/codex-bridge/.env
 

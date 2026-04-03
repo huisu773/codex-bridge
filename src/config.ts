@@ -1,15 +1,7 @@
 import dotenv from "dotenv";
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const HOME = process.env.HOME || "/root";
-
-// Load Claude Code env from ~/.claude-env if present (auth, base URL, model overrides).
-// Uses override:false so it fills in missing vars without clobbering anything already set.
-const claudeEnvPath = resolve(HOME, ".claude-env");
-if (existsSync(claudeEnvPath)) {
-  dotenv.config({ path: claudeEnvPath, override: false });
-}
 
 // Ensure npm-global bin is on PATH so `claude` binary is found in any context (systemd, cron, etc.)
 const npmGlobalBin = resolve(HOME, ".npm-global/bin");

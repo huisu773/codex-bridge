@@ -109,8 +109,7 @@ export function registerSessionCommands(): void {
         account.subscriptionStatus ? `Codex Sub: ${account.subscriptionStatus}` : "",
         copilotAccount.user ? `Copilot User: ${copilotAccount.user}` : "",
         copilotAccount.tokenStatus ? `Copilot Token: ${copilotAccount.tokenStatus}` : "",
-        claudeAccount.version ? `Claude Version: ${claudeAccount.version}` : "",
-        claudeAccount.provider ? `Claude Provider: ${claudeAccount.provider}` : "",
+        claudeAccount.version ? `Claude: v${claudeAccount.version} ${claudeAccount.status || ""}` : (claudeAccount.status || ""),
       ].filter(Boolean);
 
       await sendReply(lines.join("\n"));

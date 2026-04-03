@@ -33,7 +33,6 @@ async function main() {
     copilotModel: config.copilot.model,
     claudeBin: config.claude.bin,
     claudeModel: config.claude.model,
-    claudeBaseUrl: process.env.ANTHROPIC_BASE_URL || "(system default)",
   }, "Configuration loaded");
 
   // Load existing sessions

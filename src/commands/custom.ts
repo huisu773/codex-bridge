@@ -139,7 +139,6 @@ export function registerCustomCommands(): void {
         `Codex binary: ${config.codex.bin}`,
         `Copilot binary: ${config.copilot.bin}`,
         `Claude binary: ${config.claude.bin}`,
-        `Claude base URL: ${process.env.ANTHROPIC_BASE_URL || "(system default)"}`,
         `Rate limit: ${config.security.rateLimitPerMinute}/min`,
         `Session max age: ${config.session.maxAgeHours}h`,
         `Webhook port: ${config.webhook.port}`,
@@ -148,7 +147,7 @@ export function registerCustomCommands(): void {
     },
   });
 
-  // /engine — Switch between codex and copilot backends
+  // /engine — Switch between codex, copilot, and claude backends
   registerCommand({
     name: "engine",
     aliases: ["backend"],
@@ -165,7 +164,7 @@ export function registerCustomCommands(): void {
           "Available engines:",
           "  • `codex` — OpenAI Codex CLI (multi-turn via thread ID)",
           "  • `copilot` — GitHub Copilot CLI (PTY + ask_user, single request)",
-          "  • `claude` — Claude Code CLI (OpenRouter, multi-turn resume)",
+          "  • `claude` — Claude Code CLI (multi-turn resume)",
           "",
           "Switch: `/engine copilot` or `/engine codex` or `/engine claude`",
         ];

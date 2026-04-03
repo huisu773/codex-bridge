@@ -2,7 +2,7 @@
  * Engine registry and factory.
  *
  * Provides a unified interface for executing prompts against
- * either the Codex or Copilot backend engine.
+ * the Codex, Copilot, or Claude Code backend engine.
  */
 
 import { config } from "../config.js";

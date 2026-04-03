@@ -175,34 +175,22 @@ export function getCopilotAccountInfo(): Record<string, string> {
 export function getClaudeAccountInfo(): Record<string, string> {
   const info: Record<string, string> = {};
   try {
-    info.bin = config.claude.bin;
-    info.binStatus = existsSync(config.claude.bin) ? "✅ Found" : "❌ Not found";
     info.model = config.claude.model;
 
-    // Show auth env status (set in system env, not project config)
-    const baseUrl = process.env.ANTHROPIC_BASE_URL || "";
-    const authToken = process.env.ANTHROPIC_AUTH_TOKEN || "";
-    if (baseUrl) info.baseUrl = baseUrl;
-    info.authStatus = authToken ? "✅ ANTHROPIC_AUTH_TOKEN set" : "⚠️ ANTHROPIC_AUTH_TOKEN not set";
-
+    // Probe claude binary — resolves via PATH
     try {
-      const version = execFileSync(config.claude.bin, ["--version"], {
+      const { execFileSync } = require("node:child_process");
+      const version = execFileSync("claude", ["--version"], {
         encoding: "utf-8",
         timeout: 5000,
+        env: process.env,
       }).trim();
-      if (version) info.version = version;
+      if (version) {
+        info.version = version;
+        info.status = "✅ Available";
+      }
     } catch {
-      // Ignore version probe failures
-    }
-
-    // Check Claude config file
-    const HOME = process.env.HOME || "/root";
-    const claudeConfigPath = `${HOME}/.claude.json`;
-    if (existsSync(claudeConfigPath)) {
-      try {
-        const claudeConfig = JSON.parse(readFileSync(claudeConfigPath, "utf-8"));
-        if (claudeConfig.installMethod) info.installMethod = claudeConfig.installMethod;
-      } catch { /* ignore */ }
+      info.status = "❌ CLI not found";
     }
   } catch {
     // Ignore parse errors
