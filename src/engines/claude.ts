@@ -98,9 +98,7 @@ async function executeClaudeOnce(opts: EngineExecOptions): Promise<EngineExecRes
     "-p", prompt,
     "--output-format", "stream-json",
     "--model", model,
-    "--no-color",
     "--verbose",
-    "--dangerously-skip-permissions",
   ];
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
@@ -124,7 +122,7 @@ async function executeClaudeOnce(opts: EngineExecOptions): Promise<EngineExecRes
     const proc = spawn(claudeBin, args, {
       cwd: workDir,
       env: buildClaudeEnv(),
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],  // stdin from /dev/null — prevents "no stdin data" warning
     });
     runningProcs.set(execId, { proc, startedAt: Date.now() });
 

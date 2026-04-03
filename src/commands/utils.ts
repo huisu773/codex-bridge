@@ -177,13 +177,19 @@ export function getClaudeAccountInfo(): Record<string, string> {
   try {
     info.model = config.claude.model;
 
-    // Probe claude binary — resolves via PATH
+    // Resolve binary path via config or PATH
+    let bin = config.claude.bin;
+    if (!existsSync(bin)) {
+      try {
+        bin = execFileSync("which", [bin], { encoding: "utf-8", timeout: 3000 }).trim();
+      } catch { /* keep original */ }
+    }
+
+    // Probe claude binary
     try {
-      const { execFileSync } = require("node:child_process");
-      const version = execFileSync("claude", ["--version"], {
+      const version = execFileSync(bin, ["--version"], {
         encoding: "utf-8",
         timeout: 5000,
-        env: process.env,
       }).trim();
       if (version) {
         info.version = version;

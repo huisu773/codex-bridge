@@ -130,15 +130,24 @@ export function registerCustomCommands(): void {
     usage: "/config",
     execute: async (msg, _args, sendReply) => {
       const session = getOrCreateSession(msg.platform, msg.chatId, msg.userId);
+
+      // Resolve real binary paths (follow symlinks / which)
+      const resolveBin = (bin: string): string => {
+        try {
+          if (existsSync(bin)) return bin;
+          return execSync(`which ${bin} 2>/dev/null`, { encoding: "utf-8" }).trim() || bin;
+        } catch { return bin; }
+      };
+
       const lines = [
         "⚙️ **Runtime Configuration**",
         "",
         `Model: ${session.model}`,
         `Working dir: ${session.workingDir}`,
         `Session dir: ${config.session.dir}`,
-        `Codex binary: ${config.codex.bin}`,
-        `Copilot binary: ${config.copilot.bin}`,
-        `Claude binary: ${config.claude.bin}`,
+        `Codex binary: ${resolveBin(config.codex.bin)}`,
+        `Copilot binary: ${resolveBin(config.copilot.bin)}`,
+        `Claude binary: ${resolveBin(config.claude.bin)}`,
         `Rate limit: ${config.security.rateLimitPerMinute}/min`,
         `Session max age: ${config.session.maxAgeHours}h`,
         `Webhook port: ${config.webhook.port}`,
@@ -163,7 +172,7 @@ export function registerCustomCommands(): void {
           "",
           "Available engines:",
           "  • `codex` — OpenAI Codex CLI (multi-turn via thread ID)",
-          "  • `copilot` — GitHub Copilot CLI (PTY + ask_user, single request)",
+          "  • `copilot` — GitHub Copilot CLI (multi-turn resume)",
           "  • `claude` — Claude Code CLI (multi-turn resume)",
           "",
           "Switch: `/engine copilot` or `/engine codex` or `/engine claude`",
