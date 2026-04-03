@@ -1,19 +1,19 @@
 # Codex Bridge
 
-飞书 & Telegram ↔ Codex / Copilot CLI 桥接服务。通过聊天应用远程使用 AI 编程智能体的全部能力。
+飞书 & Telegram ↔ Codex / Copilot / Claude Code CLI 桥接服务。通过聊天应用远程使用 AI 编程智能体的全部能力。
 
 [English](README.md) | 中文
 
 ## 功能
 
 - 🤖 **双平台支持**：同时连接 Telegram 和飞书
-- ⚙️ **双引擎**：按聊天切换 **Codex CLI** 和 **GitHub Copilot CLI**
-- ⚡ **全能力代理**：直接调用 `codex exec` / `copilot-cli`，复用所有功能
+- ⚙️ **三引擎**：按聊天切换 **Codex CLI**、**GitHub Copilot CLI** 和 **Claude Code CLI**
+- ⚡ **全能力代理**：直接调用 `codex exec` / `copilot-cli` / `claude -p`，复用所有功能
 - 🔄 **多轮会话**：自动 `--resume` 实现连续对话
 - 🔐 **安全防护**：User ID 白名单 + 速率限制 + 敏感信息过滤
 - 📂 **Session 管理**：独立会话目录，完整记录对话和文件
 - 📎 **文件收发**：支持通过聊天上传文件，引擎生成的文件保存在会话目录中
-- 🖼️ **图片输入**：发送图片进行分析（Codex 与 Copilot 引擎均支持）
+- 🖼️ **图片输入**：发送图片进行分析（Codex、Copilot 与 Claude 引擎均支持）
 - 🎤 **语音消息**：自动转录为文字（需配置 STT）
 - 📡 **流式输出**：实时流式回复，带进度指示器
 - 🔧 **可扩展命令**：内置 + 自定义命令，Telegram 斜杠命令自动同步到菜单
@@ -62,6 +62,7 @@ npm start
 - **Node.js 18+**（测试环境：Node.js 22）
 - **Codex CLI** 已安装并完成认证（`codex auth login`）
 - **GitHub Copilot CLI**（可选）— 用于 Copilot 引擎
+- **Claude Code CLI**（可选）— 用于 Claude 引擎（`npm install -g @anthropic-ai/claude-code`）
 - **Telegram Bot** 令牌（从 [@BotFather](https://t.me/BotFather) 获取）
 - **飞书自建应用**（需启用机器人能力）
 
@@ -73,7 +74,7 @@ npm start
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `DEFAULT_ENGINE` | | 默认引擎：`codex` 或 `copilot`（默认：`codex`） |
+| `DEFAULT_ENGINE` | | 默认引擎：`codex`、`copilot` 或 `claude`（默认：`codex`） |
 | `CODEX_MODEL` | | 模型名称（默认：`gpt-5.4-mini`） |
 | `CODEX_WORKING_DIR` | | 工作目录（默认：`~/codex-workspace`） |
 | `CODEX_BIN` | | Codex 二进制路径（自动检测） |
@@ -89,6 +90,17 @@ npm start
 | `COPILOT_TIMEOUT_MS` | `600000` | 最大执行时间（10 分钟） |
 | `COPILOT_AUTOPILOT` | `true` | 自动驾驶模式（`--autopilot`） |
 | `COPILOT_ALLOW_ALL` | `true` | 允许所有权限（`--allow-all`） |
+
+### Claude Code 引擎配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CLAUDE_BIN` | `claude` | Claude Code CLI 二进制路径 |
+| `CLAUDE_MODEL` | `qwen/qwen3.6-plus:free` | Claude 默认模型 |
+| `CLAUDE_TIMEOUT_MS` | `600000` | 最大执行时间（10 分钟） |
+| `CLAUDE_PROVIDER` | `openrouter` | API 提供商（`anthropic` / `openrouter`） |
+| `CLAUDE_API_KEY` | | API Key（如不设置则使用 `OPENROUTER_API_KEY`） |
+| `CLAUDE_BASE_URL` | `https://openrouter.ai/api` | API 基础 URL |
 
 ### 平台凭证
 
@@ -148,7 +160,7 @@ npm start
 |------|------|
 | `/exec <cmd>` | 直接执行 Shell 命令 |
 | `/cd <dir>` | 切换工作目录 |
-| `/engine [codex\|copilot]` | 查看/切换后端引擎 |
+| `/engine [codex\|copilot\|claude]` | 查看/切换后端引擎 |
 | `/config` | 查看运行时配置 |
 | `/help` | 查看所有命令 |
 
@@ -158,7 +170,7 @@ npm start
 
 ### 引擎切换
 
-使用 `/engine codex` 或 `/engine copilot` 按聊天切换后端引擎。默认引擎通过 `DEFAULT_ENGINE` 环境变量设置（默认：`codex`）。引擎选择在服务重启后保持。
+使用 `/engine codex`、`/engine copilot` 或 `/engine claude` 按聊天切换后端引擎。默认引擎通过 `DEFAULT_ENGINE` 环境变量设置（默认：`codex`）。引擎选择在服务重启后保持。
 
 ### 支持的模型
 
@@ -187,6 +199,16 @@ npm start
 | `gemini-3.1-pro` | Gemini 3.1 Pro |
 | `gemini-3-flash` | Gemini 3 Flash |
 
+**Claude Code 引擎（OpenRouter）：**
+
+| 模型 | 说明 |
+|------|------|
+| `qwen/qwen3.6-plus:free` ⭐ | Qwen 3.6 Plus — 通过 OpenRouter 免费使用 |
+| `minimax/minimax-m2.7` | MiniMax M2.7 — 通过 OpenRouter |
+| `sonnet` | Claude Sonnet — 最新均衡 |
+| `opus` | Claude Opus — 深度推理 |
+| `haiku` | Claude Haiku — 快速轻量 |
+
 > ⭐ 标记为推荐默认模型。可用模型可能因账户计划而异。
 
 ### 文件工作流
@@ -197,8 +219,8 @@ npm start
 
 ### 图片与语音
 
-- **发送图片**：通过当前引擎分析（Codex/Copilot）
-  Copilot CLI 会在 prompt 中使用 `@path/to/image.png` 的文件引用形式。
+- **发送图片**：通过当前引擎分析（Codex/Copilot/Claude）
+  Copilot 和 Claude CLI 会在 prompt 中使用 `@path/to/image.png` 的文件引用形式。
 - **发送语音**：自动转录为文字（需配置 STT）
 
 #### STT 语音识别提供商
@@ -223,6 +245,7 @@ npm start
                                   ├────────────┤
                                   │   codex    │  codex exec (JSONL)
                                   │   copilot  │  copilot-cli (JSONL)
+                                  │   claude   │  claude -p (stream-json)
                                   └─────┬──────┘
                                         ↓
                                   会话记录
@@ -241,6 +264,8 @@ src/
 │   ├── index.ts              # 引擎工厂，按聊天切换
 │   ├── codex.ts              # Codex CLI 执行器 (JSONL)
 │   ├── copilot.ts            # Copilot CLI 执行器 (JSONL)
+│   ├── claude.ts             # Claude Code CLI 执行器 (stream-json)
+│   ├── model-catalog.ts      # 所有引擎的模型目录
 │   └── file-snapshot.ts      # 共享文件变更检测
 ├── commands/                 # 命令处理器
 │   ├── registry.ts           # 命令注册表
@@ -316,6 +341,7 @@ npm run dev      # 监视模式
 - **输出过滤**：自动屏蔽响应中的敏感信息（令牌、密钥等）
 - **健康检查端口**：默认绑定 `127.0.0.1`，不对外暴露
 - **Copilot 模式**：默认以 `--autopilot --allow-all` 运行（可通过环境变量配置）
+- **Claude 模式**：以 `--dangerously-skip-permissions` 运行 — 请确保服务器安全
 - **Codex 模式**：以 `--dangerously-bypass-approvals-and-sandbox` 运行 — 请确保服务器安全
 
 ## 许可

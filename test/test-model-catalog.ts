@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CODEX_MODELS, COPILOT_MODELS } from "../src/engines/model-catalog.js";
+import { CODEX_MODELS, COPILOT_MODELS, CLAUDE_MODELS } from "../src/engines/model-catalog.js";
 
 interface DocModel {
   id: string;
@@ -57,8 +57,10 @@ const readme = readFileSync(join(root, "README.md"), "utf8");
 
 const docCodexModels = parseSectionModels(readme, "**Codex Engine (OpenAI):**");
 const docCopilotModels = parseSectionModels(readme, "**Copilot Engine (multi-provider):**");
+const docClaudeModels = parseSectionModels(readme, "**Claude Code Engine (OpenRouter):**");
 
 assertEqual("Codex models", normalizeCodeModels(CODEX_MODELS), docCodexModels);
 assertEqual("Copilot models", normalizeCodeModels(COPILOT_MODELS), docCopilotModels);
+assertEqual("Claude models", normalizeCodeModels(CLAUDE_MODELS), docClaudeModels);
 
-console.log("OK: model catalog matches README supported models tables.");
+console.log("OK: model catalog matches README supported models tables (Codex + Copilot + Claude).");

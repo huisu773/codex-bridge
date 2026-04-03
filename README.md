@@ -1,19 +1,19 @@
 # Codex Bridge
 
-飞书 (Feishu) & Telegram ↔ Codex / Copilot CLI bridge service. Use AI coding agents remotely through your chat apps.
+飞书 (Feishu) & Telegram ↔ Codex / Copilot / Claude Code CLI bridge service. Use AI coding agents remotely through your chat apps.
 
 [English](#features) | [中文](README.zh-CN.md)
 
 ## Features
 
 - 🤖 **Dual Platform**: Connects to both Telegram and Feishu simultaneously
-- ⚙️ **Dual Engine**: Switch between **Codex CLI** and **GitHub Copilot CLI** per chat
-- ⚡ **Full Agent Power**: Wraps `codex exec` / `copilot-cli` — all capabilities available
+- ⚙️ **Triple Engine**: Switch between **Codex CLI**, **GitHub Copilot CLI**, and **Claude Code CLI** per chat
+- ⚡ **Full Agent Power**: Wraps `codex exec` / `copilot-cli` / `claude -p` — all capabilities available
 - 🔄 **Multi-turn Sessions**: Automatic `--resume` for continuous conversations
 - 🔐 **Secure**: User ID whitelist + rate limiting + sensitive output filtering
 - 📂 **Session Management**: Per-session directories with full conversation + file tracking
 - 📎 **File I/O**: Upload files through chat; files created by the engine are saved and reported
-- 🖼️ **Image Input**: Send images for analysis (supported by both Codex and Copilot engines)
+- 🖼️ **Image Input**: Send images for analysis (supported by all engines)
 - 🎤 **Voice Messages**: Auto-transcribed to text (STT) and sent to the engine
 - 📡 **Streaming**: Real-time streaming responses with progress indicators
 - 🔧 **Extensible Commands**: Built-in + custom commands with Telegram autocomplete sync
@@ -62,6 +62,7 @@ npm start
 - **Node.js 18+** (tested with Node.js 22)
 - **Codex CLI** installed and authenticated (`codex auth login`)
 - **GitHub Copilot CLI** (optional) — `npm install -g @anthropic-ai/copilot` or similar
+- **Claude Code CLI** (optional) — `npm install -g @anthropic-ai/claude-code` + OpenRouter API key
 - **Telegram Bot** token from [@BotFather](https://t.me/BotFather)
 - **Feishu App** (self-built) with bot capabilities enabled
 
@@ -73,7 +74,7 @@ All configuration is via environment variables in `.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DEFAULT_ENGINE` | | Default engine: `codex` or `copilot` (default: `codex`) |
+| `DEFAULT_ENGINE` | | Default engine: `codex`, `copilot`, or `claude` (default: `codex`) |
 | `CODEX_MODEL` | | Model name (default: `gpt-5.4-mini`) |
 | `CODEX_WORKING_DIR` | | Working directory (default: `~/codex-workspace`) |
 | `CODEX_BIN` | | Path to codex binary (auto-detected) |
@@ -89,6 +90,17 @@ All configuration is via environment variables in `.env`:
 | `COPILOT_TIMEOUT_MS` | `600000` | Max execution time (10 min) |
 | `COPILOT_AUTOPILOT` | `true` | Run in autopilot mode (`--autopilot`) |
 | `COPILOT_ALLOW_ALL` | `true` | Allow all permissions (`--allow-all`) |
+
+### Claude Code Engine
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_BIN` | `/root/.npm-global/bin/claude` | Path to Claude Code CLI binary |
+| `CLAUDE_MODEL` | `qwen/qwen3.6-plus:free` | Default model (via OpenRouter) |
+| `CLAUDE_PROVIDER` | `openrouter` | API provider: `openrouter` or `anthropic` |
+| `OPENROUTER_API_KEY` | | OpenRouter API key (required for openrouter provider) |
+| `CLAUDE_BASE_URL` | `https://openrouter.ai/api` | API base URL |
+| `CLAUDE_TIMEOUT_MS` | `600000` | Max execution time (10 min) |
 
 ### Platform Credentials
 
@@ -148,7 +160,7 @@ All configuration is via environment variables in `.env`:
 |---------|-------------|
 | `/exec <cmd>` | Execute a shell command |
 | `/cd <dir>` | Change working directory |
-| `/engine [codex\|copilot]` | View or switch the backend engine |
+| `/engine [codex\|copilot\|claude]` | View or switch the backend engine |
 | `/config` | View runtime configuration |
 | `/help` | List all commands |
 
@@ -158,7 +170,7 @@ Send any message without a `/` prefix to chat with the active engine. The engine
 
 ### Engine Switching
 
-Use `/engine codex` or `/engine copilot` to switch the backend per chat. The default is set by the `DEFAULT_ENGINE` environment variable (default: `codex`). Engine selection persists across service restarts.
+Use `/engine codex`, `/engine copilot`, or `/engine claude` to switch the backend per chat. The default is set by the `DEFAULT_ENGINE` environment variable (default: `codex`). Engine selection persists across service restarts.
 
 ### Supported Models
 
@@ -187,6 +199,16 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 | `gemini-3.1-pro` | Gemini 3.1 Pro |
 | `gemini-3-flash` | Gemini 3 Flash |
 
+**Claude Code Engine (OpenRouter):**
+
+| Model | Description |
+|-------|-------------|
+| `qwen/qwen3.6-plus:free` ⭐ | Qwen 3.6 Plus — free via OpenRouter |
+| `minimax/minimax-m2.7` | MiniMax M2.7 — via OpenRouter |
+| `sonnet` | Claude Sonnet — latest balanced |
+| `opus` | Claude Opus — deep reasoning |
+| `haiku` | Claude Haiku — fast & light |
+
 > Models marked ⭐ are recommended defaults. Available models may vary by account plan.
 
 ### File Workflow
@@ -199,8 +221,8 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 
 ### Image & Voice
 
-- **Send an image**: analyzed via the active engine (Codex/Copilot)
-  Copilot CLI image references are passed as `@path/to/image.png` in the prompt.
+- **Send an image**: analyzed via the active engine (Codex/Copilot/Claude)
+  Copilot and Claude CLI image references are passed as `@path/to/image.png` in the prompt.
 - **Send a voice message**: automatically transcribed to text (if STT configured)
 
 #### STT Provider Setup
@@ -225,6 +247,7 @@ Chat Message → Platform Handler → Auth Check → Command Router
                                               ├────────────┤
                                               │   codex    │  codex exec (JSONL)
                                               │   copilot  │  copilot-cli (JSONL)
+                                              │   claude   │  claude -p (stream-json)
                                               └─────┬──────┘
                                                     ↓
                                               Session Recording
@@ -243,6 +266,8 @@ src/
 │   ├── index.ts              # Engine factory, per-chat overrides
 │   ├── codex.ts              # Codex CLI executor (JSONL)
 │   ├── copilot.ts            # Copilot CLI executor (JSONL)
+│   ├── claude.ts             # Claude Code CLI executor (stream-json)
+│   ├── model-catalog.ts      # Model catalogs for all engines
 │   └── file-snapshot.ts      # Shared file change detection
 ├── commands/                 # Command handlers
 │   ├── registry.ts           # Command registry
@@ -322,6 +347,7 @@ npm run dev      # Watch mode
 - **Output filtering**: Sensitive patterns (tokens, keys) are masked in responses
 - **Health check port**: Binds to `127.0.0.1` by default — not exposed externally
 - **Copilot mode**: Runs with `--autopilot --allow-all` by default (configurable via env vars)
+- **Claude mode**: Runs with `--dangerously-skip-permissions` — ensure your server is properly secured
 - **Codex mode**: Runs without sandbox (`--dangerously-bypass-approvals-and-sandbox`) — ensure your server is properly secured
 
 ## License
