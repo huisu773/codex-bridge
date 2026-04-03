@@ -139,7 +139,7 @@ export function registerCustomCommands(): void {
         `Codex binary: ${config.codex.bin}`,
         `Copilot binary: ${config.copilot.bin}`,
         `Claude binary: ${config.claude.bin}`,
-        `Claude provider: ${config.claude.provider}`,
+        `Claude base URL: ${process.env.ANTHROPIC_BASE_URL || "(system default)"}`,
         `Rate limit: ${config.security.rateLimitPerMinute}/min`,
         `Session max age: ${config.session.maxAgeHours}h`,
         `Webhook port: ${config.webhook.port}`,

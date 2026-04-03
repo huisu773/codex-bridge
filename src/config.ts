@@ -41,9 +41,6 @@ export interface Config {
     model: string;
     timeoutMs: number;
     staleProcessMs: number;
-    provider: string;
-    apiKey: string;
-    baseUrl: string;
   };
   engine: "codex" | "copilot" | "claude";
   session: {
@@ -160,9 +157,6 @@ export function loadConfig(): Config {
       model: optional("CLAUDE_MODEL", "qwen/qwen3.6-plus:free"),
       timeoutMs: validateTimeout(Number(optional("CLAUDE_TIMEOUT_MS", "600000")), "CLAUDE_TIMEOUT_MS"),
       staleProcessMs: validatePositiveInt(Number(optional("CLAUDE_STALE_PROCESS_MS", "3600000")), "CLAUDE_STALE_PROCESS_MS"),
-      provider: optional("CLAUDE_PROVIDER", "openrouter"),
-      apiKey: optional("OPENROUTER_API_KEY", ""),
-      baseUrl: optional("CLAUDE_BASE_URL", "https://openrouter.ai/api"),
     },
     engine: engineVal as "codex" | "copilot" | "claude",
     session: {

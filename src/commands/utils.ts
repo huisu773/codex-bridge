@@ -177,10 +177,13 @@ export function getClaudeAccountInfo(): Record<string, string> {
   try {
     info.bin = config.claude.bin;
     info.binStatus = existsSync(config.claude.bin) ? "✅ Found" : "❌ Not found";
-    info.provider = config.claude.provider;
     info.model = config.claude.model;
-    info.baseUrl = config.claude.baseUrl;
-    info.apiKeyStatus = config.claude.apiKey ? "✅ Configured" : "❌ Not set (need OPENROUTER_API_KEY)";
+
+    // Show auth env status (set in system env, not project config)
+    const baseUrl = process.env.ANTHROPIC_BASE_URL || "";
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN || "";
+    if (baseUrl) info.baseUrl = baseUrl;
+    info.authStatus = authToken ? "✅ ANTHROPIC_AUTH_TOKEN set" : "⚠️ ANTHROPIC_AUTH_TOKEN not set";
 
     try {
       const version = execFileSync(config.claude.bin, ["--version"], {

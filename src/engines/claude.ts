@@ -4,7 +4,10 @@
  * Spawns `claude -p <prompt> --output-format stream-json` as a child process,
  * parses JSONL events for assistant text, file changes, session IDs.
  * Multi-turn conversations use `--resume <sessionId>`.
- * Supports OpenRouter as API provider via ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY.
+ *
+ * Provider auth (OpenRouter, Anthropic, etc.) is handled entirely by
+ * environment variables set in the system (e.g. ~/.bashrc). This code
+ * does not configure or override any credentials.
  */
 
 import { existsSync } from "node:fs";
@@ -59,30 +62,9 @@ export function buildPromptWithImageRefs(prompt: string, images: string[] | unde
   return `${prompt}\n\nAttached image files:\n${refs.join("\n")}\n\nPlease use these images as visual context.`;
 }
 
-/** Build environment variables for Claude CLI with OpenRouter provider support. */
+/** Pass-through environment: inherit system env, disable color. */
 function buildClaudeEnv(): Record<string, string> {
-  const env: Record<string, string> = { ...process.env as Record<string, string>, NO_COLOR: "1" };
-
-  if (config.claude.provider === "openrouter") {
-    const apiKey = config.claude.apiKey || process.env.OPENROUTER_API_KEY || "";
-    if (config.claude.baseUrl) {
-      env.ANTHROPIC_BASE_URL = config.claude.baseUrl;
-    }
-    // Per OpenRouter docs: use ANTHROPIC_AUTH_TOKEN, blank out ANTHROPIC_API_KEY
-    env.ANTHROPIC_AUTH_TOKEN = apiKey;
-    env.ANTHROPIC_API_KEY = "";
-    // Set model role overrides so Claude Code uses our preferred models
-    env.ANTHROPIC_DEFAULT_SONNET_MODEL = config.claude.model;
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || "minimax/minimax-m2.7";
-    env.ANTHROPIC_DEFAULT_OPUS_MODEL = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || config.claude.model;
-  } else {
-    // Native Anthropic provider
-    if (config.claude.apiKey) {
-      env.ANTHROPIC_API_KEY = config.claude.apiKey;
-    }
-  }
-
-  return env;
+  return { ...process.env as Record<string, string>, NO_COLOR: "1" };
 }
 
 // ─── Executor implementation ──────────────────────────────────────────────
