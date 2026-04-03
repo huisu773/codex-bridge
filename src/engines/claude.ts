@@ -64,11 +64,21 @@ function buildClaudeEnv(): Record<string, string> {
   const env: Record<string, string> = { ...process.env as Record<string, string>, NO_COLOR: "1" };
 
   if (config.claude.provider === "openrouter") {
-    if (config.claude.apiKey) {
-      env.ANTHROPIC_API_KEY = config.claude.apiKey;
-    }
+    const apiKey = config.claude.apiKey || process.env.OPENROUTER_API_KEY || "";
     if (config.claude.baseUrl) {
       env.ANTHROPIC_BASE_URL = config.claude.baseUrl;
+    }
+    // Per OpenRouter docs: use ANTHROPIC_AUTH_TOKEN, blank out ANTHROPIC_API_KEY
+    env.ANTHROPIC_AUTH_TOKEN = apiKey;
+    env.ANTHROPIC_API_KEY = "";
+    // Set model role overrides so Claude Code uses our preferred models
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = config.claude.model;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || "minimax/minimax-m2.7";
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || config.claude.model;
+  } else {
+    // Native Anthropic provider
+    if (config.claude.apiKey) {
+      env.ANTHROPIC_API_KEY = config.claude.apiKey;
     }
   }
 
