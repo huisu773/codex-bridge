@@ -94,11 +94,20 @@ async function executeClaudeOnce(opts: EngineExecOptions): Promise<EngineExecRes
 
   const beforeSnap = await snapshotDir(workDir);
 
+  // All tools Claude Code can use — pre-authorized to avoid interactive permission prompts
+  const ALLOWED_TOOLS = [
+    "Bash(*)", "Edit", "Read", "Write", "WebFetch", "WebSearch",
+    "Glob", "Grep", "Task", "AskUserQuestion", "CronCreate", "CronDelete",
+    "CronList", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree",
+    "NotebookEdit", "RemoteTrigger", "Skill", "TaskOutput", "TaskStop", "TodoWrite",
+  ];
+
   const args = [
     "-p", prompt,
     "--output-format", "stream-json",
     "--model", model,
     "--verbose",
+    "--allowedTools", ...ALLOWED_TOOLS,
   ];
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
