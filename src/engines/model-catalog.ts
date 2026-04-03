@@ -21,7 +21,10 @@ export const COPILOT_MODELS: EngineModelInfo[] = [
 
 export const CLAUDE_MODELS: EngineModelInfo[] = [
   { id: "qwen/qwen3.6-plus:free", description: "Qwen 3.6 Plus — free via OpenRouter", recommended: true },
+  { id: "minimax/minimax-m2.5:free", description: "MiniMax M2.5 — free via OpenRouter" },
   { id: "minimax/minimax-m2.7", description: "MiniMax M2.7 — via OpenRouter" },
+  { id: "z-ai/glm-5", description: "Z.ai GLM-5 — via OpenRouter" },
+  { id: "moonshotai/kimi-k2.5", description: "Moonshot Kimi K2.5 — via OpenRouter" },
   { id: "sonnet", description: "Claude Sonnet — latest balanced" },
   { id: "opus", description: "Claude Opus — deep reasoning" },
   { id: "haiku", description: "Claude Haiku — fast & light" },

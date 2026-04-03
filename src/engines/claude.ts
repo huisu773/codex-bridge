@@ -62,7 +62,15 @@ export function buildPromptWithImageRefs(prompt: string, images: string[] | unde
   return `${prompt}\n\nAttached image files:\n${refs.join("\n")}\n\nPlease use these images as visual context.`;
 }
 
-/** Pass-through environment: inherit system env, disable color. */
+/**
+ * Build environment for Claude CLI.
+ *
+ * Claude Code reads auth from environment variables. The bridge loads
+ * all vars from its `.env` file via dotenv at startup, so users just
+ * need to add their ANTHROPIC_* / OPENROUTER_* vars there.
+ *
+ * This works on any machine — no dependency on ~/.bashrc or shell config.
+ */
 function buildClaudeEnv(): Record<string, string> {
   return { ...process.env as Record<string, string>, NO_COLOR: "1" };
 }

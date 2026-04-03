@@ -204,7 +204,10 @@ npm start
 | 模型 | 说明 |
 |------|------|
 | `qwen/qwen3.6-plus:free` ⭐ | Qwen 3.6 Plus — 通过 OpenRouter 免费使用 |
+| `minimax/minimax-m2.5:free` | MiniMax M2.5 — 通过 OpenRouter 免费使用 |
 | `minimax/minimax-m2.7` | MiniMax M2.7 — 通过 OpenRouter |
+| `z-ai/glm-5` | Z.ai GLM-5 — 通过 OpenRouter |
+| `moonshotai/kimi-k2.5` | Moonshot Kimi K2.5 — 通过 OpenRouter |
 | `sonnet` | Claude Sonnet — 最新均衡 |
 | `opus` | Claude Opus — 深度推理 |
 | `haiku` | Claude Haiku — 快速轻量 |

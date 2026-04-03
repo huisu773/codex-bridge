@@ -204,7 +204,10 @@ Use `/model` (no arguments) to see all available models for the current engine. 
 | Model | Description |
 |-------|-------------|
 | `qwen/qwen3.6-plus:free` ⭐ | Qwen 3.6 Plus — free via OpenRouter |
+| `minimax/minimax-m2.5:free` | MiniMax M2.5 — free via OpenRouter |
 | `minimax/minimax-m2.7` | MiniMax M2.7 — via OpenRouter |
+| `z-ai/glm-5` | Z.ai GLM-5 — via OpenRouter |
+| `moonshotai/kimi-k2.5` | Moonshot Kimi K2.5 — via OpenRouter |
 | `sonnet` | Claude Sonnet — latest balanced |
 | `opus` | Claude Opus — deep reasoning |
 | `haiku` | Claude Haiku — fast & light |
